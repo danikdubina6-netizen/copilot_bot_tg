@@ -1,12 +1,12 @@
-name: Run Grok Telegram Bot
+name: Run Telegram Bot (Groq)
 
 on:
   schedule:
-    - cron: '0 */5 * * *' # Каждые 5 часов старый раннер гасится, новый поднимается
+    - cron: '0 */5 * * *' # Каждые 5 часов перезапуск
   workflow_dispatch:
 
 concurrency:
-  group: telegram-grok-bot-runner
+  group: telegram-bot-runner
   cancel-in-progress: true
 
 jobs:
@@ -30,6 +30,6 @@ jobs:
       - name: Run Telegram Bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: python bot.py
         
