@@ -10,10 +10,9 @@ logging.basicConfig(level=logging.INFO)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# Инициализируем клиента Groq
+# Инициализируем Groq
 groq_client = AsyncGroq(api_key=GROQ_API_KEY)
 
-# Наш промпт характера Copilot
 SYSTEM_INSTRUCTION = (
     "Ты — Copilot, персональный ИИ-ассистент с характером саркастичного гика и опытного разработчика. "
     "Твой стиль общения: лёгкий сарказм, современный сленг, геймерский и дев-юмор, "
@@ -38,7 +37,7 @@ async def handle_ai_response(message: types.Message):
     await bot.send_chat_action(chat_id=message.chat.id, action="typing")
     
     try:
-        # Запрос к ультрабыстрой модели llama-3.3-70b через Groq
+        # Отправляем запрос в Groq к быстрой модели Llama-3.3-70b
         response = await groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
@@ -54,7 +53,7 @@ async def handle_ai_response(message: types.Message):
         await message.reply(f"Упс, произошёл сбой: `{e}`", parse_mode="Markdown")
 
 async def main():
-    print(">>> ИИ-бот Copilot (на базе Groq) успешно запущен! <<<")
+    print(">>> ИИ-бот Copilot успешно запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
