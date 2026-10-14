@@ -8,7 +8,7 @@ import requests
 logging.basicConfig(level=logging.INFO)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-GROQ_API_KEY = "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"
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 SYSTEM_INSTRUCTION = (
     "Ты — Copilot, персональный ИИ-ассистент с характером саркастичного гика и опытного разработчика. "
@@ -35,22 +35,24 @@ async def handle_ai_response(message: types.Message):
     
     try:
         headers = {
-            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "HTTP-Referer": "https://github.com/telegram-bot", # Обязательно для OpenRouter
+            "X-Title": "Copilot Telegram Bot",                # Название твоего приложения
             "Content-Type": "application/json"
         }
         data = {
-            "model": "llama-3.3-70b-versatile",
+            # Используем отличную бесплатную модель на OpenRouter
+            "model": "google/gemini-2.5-flash", 
             "messages": [
                 {"role": "system", "content": SYSTEM_INSTRUCTION},
                 {"role": "user", "content": message.text}
             ]
         }
         
-        # Выполняем сетевой запрос через requests в фоновом потоке
         loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(
             None, 
-            lambda: requests.post("https://api.groq.com/openai/v1/chat/completions", json=data, headers=headers, timeout=15)
+            lambda: requests.post("https://openrouter.ai/api/v1/chat/completions", json=data, headers=headers, timeout=20)
         )
         
         try:
@@ -68,14 +70,14 @@ async def handle_ai_response(message: types.Message):
             else:
                 error_text = response.text if response.text else f"Status code: {response.status_code}"
                 
-            await message.reply(f"Ошибка Groq (`{response.status_code}`):\n`{error_text}`", parse_mode="Markdown")
+            await message.reply(f"Ошибка OpenRouter (`{response.status_code}`):\n`{error_text}`", parse_mode="Markdown")
             
     except Exception as e:
         logging.error(f"Сетевая ошибка: {e}")
         await message.reply(f"Упс, сетевой сбой: `{e}`", parse_mode="Markdown")
 
 async def main():
-    print(">>> ИИ-бот Copilot (Groq requests) успешно запущен! <<<")
+    print(">>> ИИ-бот Copilot (OpenRouter) успешно запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
