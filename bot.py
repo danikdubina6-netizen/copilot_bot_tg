@@ -3,19 +3,14 @@ import asyncio
 import logging
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
-from openai import AsyncOpenAI
+import requests
 
 logging.basicConfig(level=logging.INFO)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROK_API_KEY = os.getenv("GROK_API_KEY")
 
-grok_client = AsyncOpenAI(
-    api_key=GROK_API_KEY,
-    base_url="https://api.x.ai/v1"
-)
-
-# Системная инструкция (без упоминаний сторонних названий)
+# Системная инструкция
 SYSTEM_INSTRUCTION = (
     "Ты — Copilot, персональный ИИ-ассистент с характером саркастичного гика и опытного разработчика. "
     "Твой стиль общения: лёгкий сарказм, современный сленг, геймерский и дев-юмор, "
@@ -40,21 +35,38 @@ async def handle_ai_response(message: types.Message):
     await bot.send_chat_action(chat_id=message.chat.id, action="typing")
     
     try:
-        response = await grok_client.chat.completions.create(
-            model="grok-2-latest",  # Актуальная рабочая модель
-            messages=[
+        # Прямой запрос к API xAI через requests
+        headers = {
+            "Authorization": f"Bearer {GROK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": "grok-2-latest",
+            "messages": [
                 {"role": "system", "content": SYSTEM_INSTRUCTION},
                 {"role": "user", "content": message.text}
             ]
-        )
-        reply_text = response.choices[0].message.content
-        await message.reply(reply_text)
+        }
         
+        # Запускаем в отдельном потоке, чтобы не блокировать бота
+        loop = asyncio.get_running_loop()
+        response = await loop.run_in_executor(
+            None, 
+            lambda: requests.post("https://api.x.ai/v1/chat/completions", json=data, headers=headers)
+        )
+        
+        res_json = response.json()
+        
+        if response.status_code == 200:
+            reply_text = res_json['choices'][0]['message']['content']
+            await message.reply(reply_text)
+        else:
+            error_text = res_json.get('error', {}).get('message', str(res_json))
+            await message.reply(f"Ошибка от сервера xAI (`{response.status_code}`):\n`{error_text}`", parse_mode="Markdown")
+            
     except Exception as e:
-        error_msg = str(e)
-        logging.error(f"Ошибка API: {error_msg}")
-        # Выводим детали ошибки для отладки
-        await message.reply(f"Упс, произошёл сбой в системе... 🛠\n\n`Детали ошибки:` {error_msg}", parse_mode="Markdown")
+        logging.error(f"Ошибка: {e}")
+        await message.reply(f"Упс, произошёл сбой: `{e}`", parse_mode="Markdown")
 
 async def main():
     print(">>> ИИ-бот Copilot успешно запущен! <<<")
