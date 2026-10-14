@@ -8,7 +8,7 @@ import requests
 logging.basicConfig(level=logging.INFO)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_API_KEY = "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"
 
 SYSTEM_INSTRUCTION = (
     "Ты — Copilot, персональный ИИ-ассистент с характером саркастичного гика и опытного разработчика. "
