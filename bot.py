@@ -48,17 +48,11 @@ async def handle_ai_response(message: types.Message):
         
         # Проверяем, есть ли в сообщении фото
         if message.photo:
-            # Берем самое качественное фото (последнее в списке)
             photo = message.photo[-1]
             file_info = await bot.get_file(photo.file_id)
-            
-            # Скачиваем файл из Telegram во временную память
             file_bytes = await bot.download_file(file_info.file_path)
-            
-            # Конвертируем байты картинки в base64 строку
             base64_image = base64.b64encode(file_bytes.read()).decode('utf-8')
             
-            # Добавляем картинку в структуру запроса для OpenRouter (OpenAI-совместимый мультимодальный формат)
             user_content.append({
                 "type": "image_url",
                 "image_url": {
@@ -66,17 +60,14 @@ async def handle_ai_response(message: types.Message):
                 }
             })
 
-        # Текст сообщения или подпись к фото
         text_prompt = message.text or message.caption or "Опиши эту картинку с высоты своего сарказма."
         user_content.append({
             "type": "text",
             "text": text_prompt
         })
 
-        # Добавляем в локальную историю диалога текстовую часть (для текстовой памяти)
         chat_history[chat_id].append({"role": "user", "content": text_prompt})
         
-        # Ограничиваем историю последними 10 сообщениями
         if len(chat_history[chat_id]) > 10:
             chat_history[chat_id] = chat_history[chat_id][-10:]
 
@@ -87,14 +78,10 @@ async def handle_ai_response(message: types.Message):
             "Content-Type": "application/json"
         }
         
-        # Формируем тело запроса (в последнее сообщение пользователя передаем и текст, и картинку)
         messages_payload = [{"role": "system", "content": SYSTEM_INSTRUCTION}]
-        
-        # Переносим историю (последние сообщения), но текущее сообщение формируем с учетом картинки
-        for i, hist in enumerate(chat_history[chat_id][:-1]):
+        for hist in chat_history[chat_id][:-1]:
             messages_payload.append(hist)
             
-        # Последнее сообщение пользователя (может содержать массив с картинкой и текстом)
         messages_payload.append({"role": "user", "content": user_content})
 
         data = {
@@ -104,10 +91,18 @@ async def handle_ai_response(message: types.Message):
         }
         
         loop = asyncio.get_running_loop()
-        response = await loop.run_in_executor(
-            None, 
-            lambda: requests.post("https://openrouter.ai/api/v1/chat/completions", json=data, headers=headers, timeout=30)
-        )
+        
+        # Делаем попытку запроса, с автоматическим повтором при ошибке 429
+        response = None
+        for attempt in range(3):
+            response = await loop.run_in_executor(
+                None, 
+                lambda: requests.post("https://openrouter.ai/api/v1/chat/completions", json=data, headers=headers, timeout=30)
+            )
+            if response.status_code != 429:
+                break
+            # Если словили 429 ошибку лимитов — ждем 2 секунды и пробуем снова
+            await asyncio.sleep(2)
         
         try:
             res_json = response.json()
@@ -116,8 +111,6 @@ async def handle_ai_response(message: types.Message):
 
         if response.status_code == 200 and res_json:
             reply_text = res_json['choices'][0]['message']['content']
-            
-            # Сохраняем ответ бота в историю
             chat_history[chat_id].append({"role": "assistant", "content": reply_text})
             
             try:
@@ -138,9 +131,9 @@ async def handle_ai_response(message: types.Message):
         await message.reply(f"Упс, сетевой сбой: `{e}`", parse_mode="Markdown")
 
 async def main():
-    print(">>> ИИ-бот Copilot (OpenRouter + Vision + История) успешно запущен! <<<")
+    print(">>> ИИ-бот Copilot (OpenRouter + Retry) успешно запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+            
