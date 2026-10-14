@@ -1,0 +1,37 @@
+name: Run AI Telegram Bot
+
+on:
+  schedule:
+    # Запуск каждые 5 часов
+    - cron: '0 */5 * * *'
+  workflow_dispatch: # Возможность запустить вручную по кнопке
+
+# Гарантирует, что старый раннер отрубится, когда создастся новый
+concurrency:
+  group: telegram-bot-runner
+  cancel-in-progress: true
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Telegram Bot
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python bot.py
+        
