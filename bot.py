@@ -21,8 +21,13 @@ SYSTEM_INSTRUCTION = (
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 
+# Словарь для хранения истории диалогов по ID чата: {chat_id: [messages]}
+chat_history = {}
+
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
+    # Очищаем историю при новом старте
+    chat_history[message.chat.id] = []
     await message.answer(
         "Здарова! Я **Copilot** — твой персональный AI-ассистент с характером. ⚡️🤖\n\n"
         "Задавай любые вопросы по коду, технологиям или жизни. Только без банальщины!",
@@ -31,7 +36,20 @@ async def start_cmd(message: types.Message):
 
 @dp.message()
 async def handle_ai_response(message: types.Message):
-    await bot.send_chat_action(chat_id=message.chat.id, action="typing")
+    chat_id = message.chat.id
+    
+    # Инициализируем историю для чата, если её еще нет
+    if chat_id not in chat_history:
+        chat_history[chat_id] = []
+        
+    # Добавляем сообщение пользователя в историю
+    chat_history[chat_id].append({"role": "user", "content": message.text})
+    
+    # Ограничиваем историю последними 10 сообщениями, чтобы не перегружать контекст и память
+    if len(chat_history[chat_id]) > 10:
+        chat_history[chat_id] = chat_history[chat_id][-10:]
+
+    await bot.send_chat_action(chat_id=chat_id, action="typing")
     
     try:
         headers = {
@@ -40,13 +58,14 @@ async def handle_ai_response(message: types.Message):
             "X-Title": "Copilot Telegram Bot",
             "Content-Type": "application/json"
         }
+        
+        # Собираем полный массив сообщений: системный промпт + вся история чата
+        messages_payload = [{"role": "system", "content": SYSTEM_INSTRUCTION}] + chat_history[chat_id]
+        
         data = {
             "model": "google/gemini-2.5-flash", 
-            "max_tokens": 1000,  # <-- ВОТ ЗДЕСЬ ИСПРАВЛЕНИЕ (ограничиваем токены)
-            "messages": [
-                {"role": "system", "content": SYSTEM_INSTRUCTION},
-                {"role": "user", "content": message.text}
-            ]
+            "max_tokens": 1000,
+            "messages": messages_payload
         }
         
         loop = asyncio.get_running_loop()
@@ -62,7 +81,14 @@ async def handle_ai_response(message: types.Message):
 
         if response.status_code == 200 and res_json:
             reply_text = res_json['choices'][0]['message']['content']
-            await message.reply(reply_text)
+            
+            # Добавляем ответ бота в историю, чтобы он помнил, что ответил
+            chat_history[chat_id].append({"role": "assistant", "content": reply_text})
+            
+            try:
+                await message.reply(reply_text, parse_mode="Markdown")
+            except Exception:
+                await message.reply(reply_text)
         else:
             if isinstance(res_json, dict) and 'error' in res_json:
                 error_data = res_json['error']
@@ -77,7 +103,7 @@ async def handle_ai_response(message: types.Message):
         await message.reply(f"Упс, сетевой сбой: `{e}`", parse_mode="Markdown")
 
 async def main():
-    print(">>> ИИ-бот Copilot (OpenRouter) успешно запущен! <<<")
+    print(">>> ИИ-бот Copilot (OpenRouter + История) успешно запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
