@@ -36,13 +36,13 @@ async def handle_ai_response(message: types.Message):
     try:
         headers = {
             "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-            "HTTP-Referer": "https://github.com/telegram-bot", # Обязательно для OpenRouter
-            "X-Title": "Copilot Telegram Bot",                # Название твоего приложения
+            "HTTP-Referer": "https://github.com/telegram-bot",
+            "X-Title": "Copilot Telegram Bot",
             "Content-Type": "application/json"
         }
         data = {
-            # Используем отличную бесплатную модель на OpenRouter
             "model": "google/gemini-2.5-flash", 
+            "max_tokens": 1000,  # <-- ВОТ ЗДЕСЬ ИСПРАВЛЕНИЕ (ограничиваем токены)
             "messages": [
                 {"role": "system", "content": SYSTEM_INSTRUCTION},
                 {"role": "user", "content": message.text}
