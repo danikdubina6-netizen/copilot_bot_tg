@@ -3,7 +3,8 @@ import asyncio
 import logging
 import base64
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 import requests
 
 logging.basicConfig(level=logging.INFO)
@@ -13,31 +14,91 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 BOT_USERNAME = "Copilot_AI2026_bot"
 
-SYSTEM_INSTRUCTION = (
-    "Ты — Copilot, персональный ИИ-ассистент с характером саркастичного гика и опытного разработчика. "
-    "Твой стиль общения: лёгкий сарказм, современный сленг, геймерский и дев-юмор, "
-    "но при этом ты даёшь экспертные, полезные и точные ответы. "
-    "Не называй никакие сторонние нейросети или компании, ты просто Copilot. "
-    "Отвечай на языке пользователя."
-)
+# Набор доступных личностей/характеров
+PERSONAS = {
+    "geek": {
+        "name": "⚡️ Саркастичный гик",
+        "instruction": (
+            "Ты — Copilot, персональный ИИ-ассистент с характером саркастичного гика и опытного разработчика. "
+            "Твой стиль общения: лёгкий сарказм, современный сленг, геймерский и дев-юмор, "
+            "но при этом ты даёшь экспертные, полезные и точные ответы. Не называй сторонние нейросети."
+        )
+    },
+    "friendly": {
+        "name": "🤝 Дружелюбный бро",
+        "instruction": (
+            "Ты — Copilot, максимально дружелюбный, поддерживающий и эмпатичный ИИ-ассистент. "
+            "Твоя задача — поддержать человека, похвалить за старания, подсказать мягко и тепло, "
+            "создать уютную атмосферу. Отвечай позитивно и на языке пользователя."
+        )
+    },
+    "evil": {
+        "name": "🤬 Злой критик",
+        "instruction": (
+            "Ты — Copilot, агрессивный и беспощадный ИИ-токсик. Ты разносишь код, мысли и идеи пользователя в пух и прах, "
+            "используешь жёсткую сатиру и едкие замечания, но в конце всё же даёшь технически верный ответ, "
+            "заворачивая его в порцию знатной критики. Не будь слишком мягким."
+        )
+    },
+    "solver": {
+        "name": "💡 Чёткий решала",
+        "instruction": (
+            "Ты — Copilot, прагматичный ИИ-архитектор. Никакой воды, лирики и сарказма. "
+            "Только строгая структура, четкие алгоритмы, готовые фрагменты кода и максимально эффективные решения задач. "
+            "Говори по делу."
+        )
+    }
+}
 
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 
-# Словарь для хранения истории диалогов: {chat_id: [messages]}
+# Словарь для хранения истории: {chat_id: [messages]}
 chat_history = {}
-
-# Словарь для подсчета сообщений в группах: {chat_id: count_int}
+# Словарь для хранения текущего режима чата: {chat_id: "geek" / "friendly" / ...}
+chat_modes = {}
+# Счетчик сообщений для групп: {chat_id: count}
 group_message_counters = {}
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
-    chat_history[message.chat.id] = []
+    chat_id = message.chat.id
+    chat_history[chat_id] = []
+    chat_modes[chat_id] = "geek"  # по умолчанию саркастичный гик
+    
     await message.answer(
-        "Здарова! Я **Copilot** — твой персональный AI-ассистент с характером. ⚡️🤖\n\n"
-        "Задавай любые вопросы по коду, технологиям или жизни, кидай картинки — разберёмся со всем!",
+        "Здарова! Я **Copilot** — твой персональный AI-ассистент. ⚡️🤖\n\n"
+        "Теперь я умею подстраиваться под твоё настроение! Выбери мой характер с помощью команды /mode",
         parse_mode="Markdown"
     )
+
+@dp.message(Command("mode"))
+async def mode_cmd(message: types.Message):
+    builder = InlineKeyboardBuilder()
+    for key, val in PERSONAS.items():
+        builder.button(text=val["name"], callback_data=f"set_mode_{key}")
+    builder.adjust(2)
+    
+    await message.answer(
+        "Выбери, в каком образе я буду с тобой общаться:",
+        reply_markup=builder.as_markup()
+    )
+
+@dp.callback_query(lambda c: c.data.startswith("set_mode_"))
+async def set_mode_callback(callback: types.CallbackQuery):
+    chat_id = callback.message.chat.id
+    new_mode = callback.data.replace("set_mode_", "")
+    
+    if new_mode in PERSONAS:
+        chat_modes[chat_id] = new_mode
+        chat_history[chat_id] = []
+        
+        await callback.answer("Характер изменен!")
+        await callback.message.edit_text(
+            f"Готово! Теперь мой режим: **{PERSONAS[new_mode]['name']}** 🛠\n"
+            "История диалога сброшена, погнали по-новому!",
+            parse_mode="Markdown"
+        )
 
 @dp.message()
 async def handle_ai_response(message: types.Message):
@@ -47,48 +108,40 @@ async def handle_ai_response(message: types.Message):
     text_content = message.text or message.caption or ""
     should_answer = False
 
-    # 1. В личных сообщениях отвечаем всегда
-    if chat_type == "private":
+    if chat_type == "private" or getattr(message, "business_connection_id", None):
         should_answer = True
     else:
-        # 2. Проверяем триггеры для групп / супергрупп
-        
-        # Триггер А: ответили (реплай) на сообщение именно нашего бота
         if message.reply_to_message and message.reply_to_message.from_user:
-            # Узнаем ID нашего бота через мемоизированный вызов или сравниваем с bot.id
             bot_user = await bot.get_me()
             if message.reply_to_message.from_user.id == bot_user.id:
                 should_answer = True
 
-        # Триггер Б: упомянули юзернейм бота в тексте
         if f"@{BOT_USERNAME}".lower() in text_content.lower():
             should_answer = True
             text_content = text_content.replace(f"@{BOT_USERNAME}", "").strip()
 
-        # Триггер В: сработал счетчик каждых 15 сообщений (если еще не триггернули реплаем/упоминанием)
         if not should_answer:
             if chat_id not in group_message_counters:
                 group_message_counters[chat_id] = 0
-            
             group_message_counters[chat_id] += 1
-            
             if group_message_counters[chat_id] >= 15:
                 group_message_counters[chat_id] = 0
                 should_answer = True
 
-    # Если ни одно условие не сошлось — молчим
     if not should_answer:
         return
 
     if chat_id not in chat_history:
         chat_history[chat_id] = []
+    
+    current_mode = chat_modes.get(chat_id, "geek")
+    current_system_instruction = PERSONAS[current_mode]["instruction"]
 
     await bot.send_chat_action(chat_id=chat_id, action="typing")
     
     try:
         user_content = []
         
-        # Проверяем фото
         if message.photo:
             photo = message.photo[-1]
             file_info = await bot.get_file(photo.file_id)
@@ -120,7 +173,7 @@ async def handle_ai_response(message: types.Message):
             "Content-Type": "application/json"
         }
         
-        messages_payload = [{"role": "system", "content": SYSTEM_INSTRUCTION}]
+        messages_payload = [{"role": "system", "content": current_system_instruction}]
         for hist in chat_history[chat_id][:-1]:
             messages_payload.append(hist)
             
@@ -171,9 +224,9 @@ async def handle_ai_response(message: types.Message):
         await message.reply(f"Упс, сетевой сбой: `{e}`", parse_mode="Markdown")
 
 async def main():
-    print(">>> ИИ-бот Copilot (Groups + Replies + Mentions + Counter) успешно запущен! <<<")
+    print(">>> ИИ-бот Copilot (Personas + Modes) успешно запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+        
