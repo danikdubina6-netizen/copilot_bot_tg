@@ -11,7 +11,6 @@ logging.basicConfig(level=logging.INFO)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
-# Юзернейм твоего бота без @ для проверки упоминаний (или с @, обработаем ниже)
 BOT_USERNAME = "Copilot_AI2026_bot"
 
 SYSTEM_INSTRUCTION = (
@@ -45,34 +44,39 @@ async def handle_ai_response(message: types.Message):
     chat_id = message.chat.id
     chat_type = message.chat.type
     
-    # Текст сообщения или подпись к фото
     text_content = message.text or message.caption or ""
-    
-    # Флаг: нужно ли отвечать боту
     should_answer = False
 
     # 1. В личных сообщениях отвечаем всегда
     if chat_type == "private":
         should_answer = True
     else:
-        # 2. В группах проверяем условия
-        # Условие А: упомянули юзернейм бота
+        # 2. Проверяем триггеры для групп / супергрупп
+        
+        # Триггер А: ответили (реплай) на сообщение именно нашего бота
+        if message.reply_to_message and message.reply_to_message.from_user:
+            # Узнаем ID нашего бота через мемоизированный вызов или сравниваем с bot.id
+            bot_user = await bot.get_me()
+            if message.reply_to_message.from_user.id == bot_user.id:
+                should_answer = True
+
+        # Триггер Б: упомянули юзернейм бота в тексте
         if f"@{BOT_USERNAME}".lower() in text_content.lower():
             should_answer = True
-            # Очищаем юзернейм из текста, чтобы боту не резало глаза лишнее @mention
             text_content = text_content.replace(f"@{BOT_USERNAME}", "").strip()
-        else:
-            # Условие Б: считаем каждое 15-е сообщение в группе
+
+        # Триггер В: сработал счетчик каждых 15 сообщений (если еще не триггернули реплаем/упоминанием)
+        if not should_answer:
             if chat_id not in group_message_counters:
                 group_message_counters[chat_id] = 0
             
             group_message_counters[chat_id] += 1
             
             if group_message_counters[chat_id] >= 15:
-                group_message_counters[chat_id] = 0  # Сбрасываем счетчик
+                group_message_counters[chat_id] = 0
                 should_answer = True
 
-    # Если в группе не выполнилось ни одно условие — просто игнорируем сообщение
+    # Если ни одно условие не сошлось — молчим
     if not should_answer:
         return
 
@@ -84,7 +88,7 @@ async def handle_ai_response(message: types.Message):
     try:
         user_content = []
         
-        # Проверяем, есть ли в сообщении фото
+        # Проверяем фото
         if message.photo:
             photo = message.photo[-1]
             file_info = await bot.get_file(photo.file_id)
@@ -98,7 +102,7 @@ async def handle_ai_response(message: types.Message):
                 }
             })
 
-        final_prompt = text_content if text_content else "Опиши эту картинку с высоты своего сарказма."
+        final_prompt = text_content if text_content else "Прокомментируй это."
         user_content.append({
             "type": "text",
             "text": final_prompt
@@ -130,7 +134,6 @@ async def handle_ai_response(message: types.Message):
         
         loop = asyncio.get_running_loop()
         
-        # Запрос с автоповтором при ошибке 429
         response = None
         for attempt in range(3):
             response = await loop.run_in_executor(
@@ -168,7 +171,7 @@ async def handle_ai_response(message: types.Message):
         await message.reply(f"Упс, сетевой сбой: `{e}`", parse_mode="Markdown")
 
 async def main():
-    print(">>> ИИ-бот Copilot (Groups + Mentions + Counter) успешно запущен! <<<")
+    print(">>> ИИ-бот Copilot (Groups + Replies + Mentions + Counter) успешно запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
