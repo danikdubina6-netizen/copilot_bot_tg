@@ -1,8 +1,8 @@
-name: Run Telegram Bot (Groq)
+name: Run Telegram Bot (OpenRouter)
 
 on:
   schedule:
-    - cron: '0 */5 * * *' # Каждые 5 часов перезапуск
+    - cron: '0 */5 * * *' # Peresadok каждые 5 часов для поддержания постоянной работы
   workflow_dispatch:
 
 concurrency:
@@ -30,6 +30,6 @@ jobs:
       - name: Run Telegram Bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: python bot.py
         
