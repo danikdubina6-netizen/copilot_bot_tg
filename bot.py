@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+import base64
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
 import requests
@@ -21,16 +22,15 @@ SYSTEM_INSTRUCTION = (
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 
-# Словарь для хранения истории диалогов по ID чата: {chat_id: [messages]}
+# Словарь для хранения истории диалогов: {chat_id: [messages]}
 chat_history = {}
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
-    # Очищаем историю при новом старте
     chat_history[message.chat.id] = []
     await message.answer(
         "Здарова! Я **Copilot** — твой персональный AI-ассистент с характером. ⚡️🤖\n\n"
-        "Задавай любые вопросы по коду, технологиям или жизни. Только без банальщины!",
+        "Задавай любые вопросы по коду, технологиям или жизни, кидай картинки — разберёмся со всем!",
         parse_mode="Markdown"
     )
 
@@ -38,20 +38,48 @@ async def start_cmd(message: types.Message):
 async def handle_ai_response(message: types.Message):
     chat_id = message.chat.id
     
-    # Инициализируем историю для чата, если её еще нет
     if chat_id not in chat_history:
         chat_history[chat_id] = []
-        
-    # Добавляем сообщение пользователя в историю
-    chat_history[chat_id].append({"role": "user", "content": message.text})
-    
-    # Ограничиваем историю последними 10 сообщениями, чтобы не перегружать контекст и память
-    if len(chat_history[chat_id]) > 10:
-        chat_history[chat_id] = chat_history[chat_id][-10:]
 
     await bot.send_chat_action(chat_id=chat_id, action="typing")
     
     try:
+        user_content = []
+        
+        # Проверяем, есть ли в сообщении фото
+        if message.photo:
+            # Берем самое качественное фото (последнее в списке)
+            photo = message.photo[-1]
+            file_info = await bot.get_file(photo.file_id)
+            
+            # Скачиваем файл из Telegram во временную память
+            file_bytes = await bot.download_file(file_info.file_path)
+            
+            # Конвертируем байты картинки в base64 строку
+            base64_image = base64.b64encode(file_bytes.read()).decode('utf-8')
+            
+            # Добавляем картинку в структуру запроса для OpenRouter (OpenAI-совместимый мультимодальный формат)
+            user_content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{base64_image}"
+                }
+            })
+
+        # Текст сообщения или подпись к фото
+        text_prompt = message.text or message.caption or "Опиши эту картинку с высоты своего сарказма."
+        user_content.append({
+            "type": "text",
+            "text": text_prompt
+        })
+
+        # Добавляем в локальную историю диалога текстовую часть (для текстовой памяти)
+        chat_history[chat_id].append({"role": "user", "content": text_prompt})
+        
+        # Ограничиваем историю последними 10 сообщениями
+        if len(chat_history[chat_id]) > 10:
+            chat_history[chat_id] = chat_history[chat_id][-10:]
+
         headers = {
             "Authorization": f"Bearer {OPENROUTER_API_KEY}",
             "HTTP-Referer": "https://github.com/telegram-bot",
@@ -59,9 +87,16 @@ async def handle_ai_response(message: types.Message):
             "Content-Type": "application/json"
         }
         
-        # Собираем полный массив сообщений: системный промпт + вся история чата
-        messages_payload = [{"role": "system", "content": SYSTEM_INSTRUCTION}] + chat_history[chat_id]
+        # Формируем тело запроса (в последнее сообщение пользователя передаем и текст, и картинку)
+        messages_payload = [{"role": "system", "content": SYSTEM_INSTRUCTION}]
         
+        # Переносим историю (последние сообщения), но текущее сообщение формируем с учетом картинки
+        for i, hist in enumerate(chat_history[chat_id][:-1]):
+            messages_payload.append(hist)
+            
+        # Последнее сообщение пользователя (может содержать массив с картинкой и текстом)
+        messages_payload.append({"role": "user", "content": user_content})
+
         data = {
             "model": "google/gemini-2.5-flash", 
             "max_tokens": 1000,
@@ -71,7 +106,7 @@ async def handle_ai_response(message: types.Message):
         loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(
             None, 
-            lambda: requests.post("https://openrouter.ai/api/v1/chat/completions", json=data, headers=headers, timeout=20)
+            lambda: requests.post("https://openrouter.ai/api/v1/chat/completions", json=data, headers=headers, timeout=30)
         )
         
         try:
@@ -82,7 +117,7 @@ async def handle_ai_response(message: types.Message):
         if response.status_code == 200 and res_json:
             reply_text = res_json['choices'][0]['message']['content']
             
-            # Добавляем ответ бота в историю, чтобы он помнил, что ответил
+            # Сохраняем ответ бота в историю
             chat_history[chat_id].append({"role": "assistant", "content": reply_text})
             
             try:
@@ -103,7 +138,7 @@ async def handle_ai_response(message: types.Message):
         await message.reply(f"Упс, сетевой сбой: `{e}`", parse_mode="Markdown")
 
 async def main():
-    print(">>> ИИ-бот Copilot (OpenRouter + История) успешно запущен! <<<")
+    print(">>> ИИ-бот Copilot (OpenRouter + Vision + История) успешно запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
