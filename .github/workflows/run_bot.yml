@@ -1,14 +1,12 @@
-name: Run AI Telegram Bot
+name: Run Grok Telegram Bot
 
 on:
   schedule:
-    # Запуск каждые 5 часов
-    - cron: '0 */5 * * *'
-  workflow_dispatch: # Возможность запустить вручную по кнопке
+    - cron: '0 */5 * * *' # Каждые 5 часов старый раннер гасится, новый поднимается
+  workflow_dispatch:
 
-# Гарантирует, что старый раннер отрубится, когда создастся новый
 concurrency:
-  group: telegram-bot-runner
+  group: telegram-grok-bot-runner
   cancel-in-progress: true
 
 jobs:
@@ -32,6 +30,6 @@ jobs:
       - name: Run Telegram Bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
         run: python bot.py
         
