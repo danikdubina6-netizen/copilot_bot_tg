@@ -11,6 +11,9 @@ logging.basicConfig(level=logging.INFO)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
+# Юзернейм твоего бота без @ для проверки упоминаний (или с @, обработаем ниже)
+BOT_USERNAME = "Copilot_AI2026_bot"
+
 SYSTEM_INSTRUCTION = (
     "Ты — Copilot, персональный ИИ-ассистент с характером саркастичного гика и опытного разработчика. "
     "Твой стиль общения: лёгкий сарказм, современный сленг, геймерский и дев-юмор, "
@@ -25,6 +28,9 @@ dp = Dispatcher()
 # Словарь для хранения истории диалогов: {chat_id: [messages]}
 chat_history = {}
 
+# Словарь для подсчета сообщений в группах: {chat_id: count_int}
+group_message_counters = {}
+
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
     chat_history[message.chat.id] = []
@@ -37,7 +43,39 @@ async def start_cmd(message: types.Message):
 @dp.message()
 async def handle_ai_response(message: types.Message):
     chat_id = message.chat.id
+    chat_type = message.chat.type
     
+    # Текст сообщения или подпись к фото
+    text_content = message.text or message.caption or ""
+    
+    # Флаг: нужно ли отвечать боту
+    should_answer = False
+
+    # 1. В личных сообщениях отвечаем всегда
+    if chat_type == "private":
+        should_answer = True
+    else:
+        # 2. В группах проверяем условия
+        # Условие А: упомянули юзернейм бота
+        if f"@{BOT_USERNAME}".lower() in text_content.lower():
+            should_answer = True
+            # Очищаем юзернейм из текста, чтобы боту не резало глаза лишнее @mention
+            text_content = text_content.replace(f"@{BOT_USERNAME}", "").strip()
+        else:
+            # Условие Б: считаем каждое 15-е сообщение в группе
+            if chat_id not in group_message_counters:
+                group_message_counters[chat_id] = 0
+            
+            group_message_counters[chat_id] += 1
+            
+            if group_message_counters[chat_id] >= 15:
+                group_message_counters[chat_id] = 0  # Сбрасываем счетчик
+                should_answer = True
+
+    # Если в группе не выполнилось ни одно условие — просто игнорируем сообщение
+    if not should_answer:
+        return
+
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
@@ -60,13 +98,13 @@ async def handle_ai_response(message: types.Message):
                 }
             })
 
-        text_prompt = message.text or message.caption or "Опиши эту картинку с высоты своего сарказма."
+        final_prompt = text_content if text_content else "Опиши эту картинку с высоты своего сарказма."
         user_content.append({
             "type": "text",
-            "text": text_prompt
+            "text": final_prompt
         })
 
-        chat_history[chat_id].append({"role": "user", "content": text_prompt})
+        chat_history[chat_id].append({"role": "user", "content": final_prompt})
         
         if len(chat_history[chat_id]) > 10:
             chat_history[chat_id] = chat_history[chat_id][-10:]
@@ -92,7 +130,7 @@ async def handle_ai_response(message: types.Message):
         
         loop = asyncio.get_running_loop()
         
-        # Делаем попытку запроса, с автоматическим повтором при ошибке 429
+        # Запрос с автоповтором при ошибке 429
         response = None
         for attempt in range(3):
             response = await loop.run_in_executor(
@@ -101,7 +139,6 @@ async def handle_ai_response(message: types.Message):
             )
             if response.status_code != 429:
                 break
-            # Если словили 429 ошибку лимитов — ждем 2 секунды и пробуем снова
             await asyncio.sleep(2)
         
         try:
@@ -131,9 +168,9 @@ async def handle_ai_response(message: types.Message):
         await message.reply(f"Упс, сетевой сбой: `{e}`", parse_mode="Markdown")
 
 async def main():
-    print(">>> ИИ-бот Copilot (OpenRouter + Retry) успешно запущен! <<<")
+    print(">>> ИИ-бот Copilot (Groups + Mentions + Counter) успешно запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-            
+    
