@@ -18,17 +18,16 @@ OPENROUTER_KEYS = [
     os.getenv("OPENROUTER_API_KEY_2"),
     os.getenv("OPENROUTER_API_KEY_3")
 ]
-OPENROUTER_KEYS = [k.strip() for k in OPENROUTER_KEYS if k and k.strip()]
+OPENROUTER_KEYS = [k.strip() for k in OPENROUTER_KEYS if k and k.strip() and k != "None"]
 
-# Если секреты не подтянулись, можешь вписать сюда свой рабочий ключ в кавычки для подстраховки:
+# СТРАХОВКА: если переменные окружения из GitHub Secrets пустые, 
+# впиши свой рабочий ключ сюда прямо в кавычки, чтобы бот не выдавал 401:
 if not OPENROUTER_KEYS:
-    OPENROUTER_KEYS = ["sk-or-v1-ТВОЙ_КЛЮЧ_ЕСЛИ_НУЖНО"]
-    OPENROUTER_KEYS = [k for k in OPENROUTER_KEYS if "ТВОЙ_КЛЮЧ" not in k]
-
-# Логируем ключи при старте (показывает первые 6 символов и длину, чтобы проверить видимость)
-for i, k in enumerate(OPENROUTER_KEYS):
-    masked = k[:6] + "..." if len(k) > 6 else "КОРОТКИЙ КЛЮЧ"
-    logging.info(f"🔑 Ключ #{i+1}: {masked} (Длина: {len(k)})")
+    OPENROUTER_KEYS = [
+        "sk-or-v1-сюда_вставь_свой_рабочий_ключ"
+    ]
+    # Убираем дефолтный текст, если пользователь его не заменил
+    OPENROUTER_KEYS = [k for k in OPENROUTER_KEYS if "сюда_вставь" not in k]
 
 current_key_index = 0
 
@@ -247,7 +246,7 @@ async def handle_ai_response(message: types.Message):
         reply_text = ""
         last_error = ""
 
-        for _ in range(len(OPENROUTER_KEYS)):
+        for _ in range(len(OPENROUTER_KEYS) if OPENROUTER_KEYS else 1):
             active_key = get_next_openrouter_key()
             if not active_key:
                 break
@@ -307,4 +306,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-            
+                
