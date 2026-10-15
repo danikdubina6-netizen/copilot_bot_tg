@@ -21,7 +21,7 @@ if GROQ_API_KEY:
 
 BOT_USERNAME = "Copilot_AI2026_bot"
 
-# Используем быструю и стабильную модель
+# Используем самую стабильную модель Groq
 AI_MODEL = "llama-3.1-8b-instant"
 
 PERSONAS = {
@@ -170,7 +170,7 @@ async def handle_ai_response(message: types.Message):
         messages_payload.extend(chat_history[chat_id])
 
         if not client:
-            await message.reply("Ошибка конфигурации ассистента.")
+            await message.reply("Ошибка: GROQ_API_KEY не найден в Secrets!")
             return
 
         loop = asyncio.get_running_loop()
@@ -195,7 +195,7 @@ async def handle_ai_response(message: types.Message):
 
     except Exception as e:
         logging.error(f"Ошибка API: {e}")
-        await message.reply("Внутренняя ошибка обработки запроса.")
+        await message.reply(f"⚠️ Ошибка API:\n`{e}`", parse_mode="Markdown")
 
 async def main():
     print(">>> Copilot AI запущен! <<<")
