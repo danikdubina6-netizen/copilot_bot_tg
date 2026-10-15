@@ -65,7 +65,7 @@ async def start_cmd(message: types.Message):
     
     await message.answer(
         "Здарова! Я **Copilot** — твой персональный AI-ассистент. ⚡️🤖\n\n"
-        "Выбирай характер через /mode и кидай задачи или картинки. Теперь я еще и умею ставить реакции по запросу!",
+        "Выбирай характер через /mode и кидай задачи. Теперь я умею ставить реакции на чужие сообщения через реплай!",
         parse_mode="Markdown"
     )
 
@@ -110,7 +110,8 @@ async def handle_ai_response(message: types.Message):
     else:
         if message.reply_to_message and message.reply_to_message.from_user:
             bot_user = await bot.get_me()
-            if message.reply_to_message.from_user.id == bot_user.id:
+            # Отвечаем, если реплай на сообщение самого бота ИЛИ если в тексте просят поставить реакцию через реплай на другого
+            if message.reply_to_message.from_user.id == bot_user.id or message.reply_to_message:
                 should_answer = True
 
         if f"@{BOT_USERNAME}".lower() in text_content.lower():
@@ -128,12 +129,11 @@ async def handle_ai_response(message: types.Message):
     if not should_answer:
         return
 
-    # --- ЛОГИКА РЕАКЦИЙ ---
+    # --- ЛОГИКА РЕАКЦИЙ (ТЕПЕРЬ С ПОДДЕРЖКОЙ РЕПЛАЕВ НА ДРУГИХ) ---
     try:
         lower_text = text_content.lower()
         chosen_emoji = None
         
-        # Проверяем, просит ли пользователь конкретную реакцию в тексте
         if "лайк" in lower_text or "палец вверх" in lower_text or "👍" in text_content:
             chosen_emoji = "👍"
         elif "огонь" in lower_text or "топ" in lower_text or "🔥" in text_content:
@@ -149,15 +149,21 @@ async def handle_ai_response(message: types.Message):
         elif "ракета" in lower_text or "лети" in lower_text or "🚀" in text_content:
             chosen_emoji = "🚀"
         else:
-            # Если конкретную не просили, но бот ответил в группе — ставим рандомный крутой смайлик
             default_emojis = ["👍", "🔥", "⚡️", "🧠", "👀", "💻"]
             chosen_emoji = random.choice(default_emojis)
 
-        # Ставим реакцию на сообщение пользователя
-        await message.react([types.ReactionTypeEmoji(emoji=chosen_emoji)])
+        # Определяем, на какое сообщение ставить реакцию:
+        # Если пользователь сделал реплай на чье-то сообщение — ставим туда. Иначе — на сообщение самого пользователя.
+        target_message_id = message.reply_to_message.message_id if message.reply_to_message else message.message_id
+
+        await bot.set_message_reaction(
+            chat_id=chat_id,
+            message_id=target_message_id,
+            reaction=[types.ReactionTypeEmoji(emoji=chosen_emoji)]
+        )
     except Exception as e:
-        logging.info(f"Не удалось поставить реакцию (возможно, нет прав в группе): {e}")
-    # ----------------------
+        logging.info(f"Не удалось поставить реакцию: {e}")
+    # -------------------------------------------------------------
 
     if chat_id not in chat_history:
         chat_history[chat_id] = []
@@ -252,7 +258,7 @@ async def handle_ai_response(message: types.Message):
         await message.reply(f"Упс, сетевой сбой: `{e}`", parse_mode="Markdown")
 
 async def main():
-    print(">>> ИИ-бот Copilot (Reactions + Modes) успешно запущен! <<<")
+    print(">>> ИИ-бот Copilot (Reactions on Reply + Modes) успешно запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
