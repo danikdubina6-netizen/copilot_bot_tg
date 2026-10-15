@@ -21,8 +21,8 @@ if GROQ_API_KEY:
 
 BOT_USERNAME = "Copilot_AI2026_bot"
 
-# Используем самую стабильную модель Groq
-AI_MODEL = "llama-3.1-8b-instant"
+# Точная проверенная модель на Groq
+AI_MODEL = "llama3-8b-8192"
 
 PERSONAS = {
     "geek": {
@@ -203,4 +203,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+        
