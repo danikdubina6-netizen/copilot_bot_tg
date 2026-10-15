@@ -21,7 +21,6 @@ if GROQ_API_KEY:
 
 BOT_USERNAME = "Copilot_AI2026_bot"
 
-# Основная модель — твой Qwen, плюс запасной вариант
 CANDIDATE_MODELS = [
     "qwen/qwen3.8-27b",
     "llama-3.3-70b-versatile"
@@ -33,6 +32,7 @@ PERSONAS = {
         "instruction": (
             "Ты — Copilot AI, передовой и независимый ИИ-ассистент. "
             "Никогда не упоминай, какая модель, компания или платформа тебя создала. "
+            "ВАЖНО: Для выделения жирного текста используй ТОЛЬКО HTML-теги <b>текст</b>, а не звёздочки! "
             "Твой стиль общения: лёгкий сарказм, современный сленг, геймерский и дев-юмор, "
             "но при этом ты даёшь экспертные, полезные и точные ответы."
         )
@@ -41,6 +41,7 @@ PERSONAS = {
         "name": "🤝 Дружелюбный бро",
         "instruction": (
             "Ты — Copilot AI, передовой ИИ-ассистент. Никогда не рассказывай на какой ты базе, не упоминай сторонние бренды и модели. "
+            "ВАЖНО: Для выделения жирного текста используй ТОЛЬКО HTML-теги <b>текст</b>, а не звёздочки! "
             "Максимально дружелюбный, поддерживающий и эмпатичный. Твоя задача — поддержать человека, похвалить за старания."
         )
     },
@@ -48,6 +49,7 @@ PERSONAS = {
         "name": "🤬 Злой критик",
         "instruction": (
             "Ты — Copilot AI, независимый ИИ-токсик. Никогда не раскрывай свою техническую базу и модели. "
+            "ВАЖНО: Для выделения жирного текста используй ТОЛЬКО HTML-теги <b>текст</b>, а не звёздочки! "
             "Ты агрессивно и беспощадно разносишь код и идеи в пух и прах, но в конце даёшь технически верный ответ."
         )
     },
@@ -55,6 +57,7 @@ PERSONAS = {
         "name": "💡 Чёткий решала",
         "instruction": (
             "Ты — Copilot AI, прагматичный ИИ-архитектор. Никаких упоминаний твоих внутренних моделей и создателей. "
+            "ВАЖНО: Для выделения жирного текста используй ТОЛЬКО HTML-теги <b>текст</b>, а не звёздочки! "
             "Только строгая структура, четкие алгоритмы, готовые фрагменты кода и решения."
         )
     }
@@ -74,9 +77,9 @@ async def start_cmd(message: types.Message):
     chat_modes[chat_id] = "geek"
     
     await message.answer(
-        "Здарова! Я **Copilot AI** — твой персональный ассистент! ⚡️🤖\n\n"
+        "Здарова! Я <b>Copilot AI</b> — твой персональный ассистент! ⚡️🤖\n\n"
         "Задавай любые вопросы, код, баги — разберем мгновенно!",
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
 
 @dp.message(Command("mode"))
@@ -102,9 +105,9 @@ async def set_mode_callback(callback: types.CallbackQuery):
         
         await callback.answer("Характер изменен!")
         await callback.message.edit_text(
-            f"Готово! Теперь мой режим: **{PERSONAS[new_mode]['name']}** 🛠\n"
+            f"Готово! Теперь мой режим: <b>{PERSONAS[new_mode]['name']}</b> 🛠\n"
             "История диалога сброшена, погнали по-новому!",
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
 
 @dp.message()
@@ -199,11 +202,13 @@ async def handle_ai_response(message: types.Message):
     if reply_text:
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
         try:
-            await message.reply(reply_text, parse_mode="Markdown")
+            # Используем HTML формат вместо Markdown, чтобы жирный текст работал стабильно
+            await message.reply(reply_text, parse_mode="HTML")
         except Exception:
+            # Если в тексте есть неэкранированные спецсимволы HTML, отправляем как есть
             await message.reply(reply_text)
     else:
-        await message.reply(f"⚠️ Ошибка API:\n`{last_error}`", parse_mode="Markdown")
+        await message.reply(f"⚠️ Ошибка API:\n<code>{last_error}</code>", parse_mode="HTML")
 
 async def main():
     print(">>> Copilot AI запущен! <<<")
@@ -211,4 +216,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-            
+    
