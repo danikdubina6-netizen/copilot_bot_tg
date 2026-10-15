@@ -209,11 +209,11 @@ async def handle_ai_response(message: types.Message):
         
         messages_payload = [{"role": "system", "content": current_system_instruction}]
         
-        # Перебираем модели: если фотка — берем бесплатную Gemini Flash Lite, если текст — Mistral
+        # ТОЛЬКО СТАБИЛЬНЫЕ НЕ-GEMINI ФРИШКИ
         models_to_try = (
-            ["google/gemini-2.0-flash-lite-preview-02-05:free", "google/gemma-3-27b-it:free"]
+            ["qwen/qwen-2.5-vl-72b-instruct:free", "meta-llama/llama-3.2-11b-vision-instruct:free"]
             if is_photo
-            else ["mistralai/mistral-7b-instruct:free", "google/gemma-4-31b-it:free"]
+            else ["mistralai/mistral-7b-instruct:free", "qwen/qwen-2.5-72b-instruct:free"]
         )
 
         for hist in chat_history[chat_id][:-1]:
@@ -228,7 +228,6 @@ async def handle_ai_response(message: types.Message):
         response = None
         res_json = None
 
-        # Пробуем отправить запрос по очереди в список доступных моделей
         for model_name in models_to_try:
             data = {
                 "model": model_name,
@@ -236,24 +235,24 @@ async def handle_ai_response(message: types.Message):
                 "messages": messages_payload
             }
             
-            for attempt in range(2):
+            try:
                 response = await loop.run_in_executor(
                     None, 
                     lambda: requests.post("https://openrouter.ai/api/v1/chat/completions", json=data, headers=headers, timeout=30)
                 )
-                if response.status_code == 200:
+                if response and response.status_code == 200:
                     break
-                await asyncio.sleep(1)
+            except Exception as req_err:
+                logging.error(f"Ошибка запроса к {model_name}: {req_err}")
             
-            if response and response.status_code == 200:
-                break
+            await asyncio.sleep(1)
 
         try:
             res_json = response.json() if response else None
         except Exception:
             res_json = None
 
-        if response and response.status_code == 200 and res_json:
+        if response and response.status_code == 200 and res_json and 'choices' in res_json:
             reply_text = res_json['choices'][0]['message']['content']
             chat_history[chat_id].append({"role": "assistant", "content": reply_text})
             
@@ -266,18 +265,18 @@ async def handle_ai_response(message: types.Message):
                 error_data = res_json['error']
                 error_text = error_data.get('message', str(error_data)) if isinstance(error_data, dict) else str(error_data)
             else:
-                error_text = response.text if response else "Unknown Error"
+                error_text = response.text if response else "Сервер OpenRouter не ответил"
                 
-            await message.reply(f"Ошибка OpenRouter (`{response.status_code if response else 'No Resp'}`):\n`{error_text}`", parse_mode="Markdown")
+            await message.reply(f"Ошибка OpenRouter (`{response.status_code if response else 'Timeout'}`):\n`{error_text}`", parse_mode="Markdown")
             
     except Exception as e:
         logging.error(f"Сетевая ошибка: {e}")
         await message.reply(f"Упс, сетевой сбой: `{e}`", parse_mode="Markdown")
 
 async def main():
-    print(">>> ИИ-бот Copilot с поддержкой фото (Vision + Auto-Fallback) запущен! <<<")
+    print(">>> ИИ-бот Copilot запущен (Qwen/Mistral No-Gemini Build)! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+            
