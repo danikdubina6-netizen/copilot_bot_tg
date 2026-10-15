@@ -171,7 +171,7 @@ async def handle_ai_response(message: types.Message):
 
         loop = asyncio.get_running_loop()
         
-        # Отправляем запрос в модель Llama 3.3 70B
+        # Запрос в 100% рабочую модель Groq Llama 3.3 70B
         response = await loop.run_in_executor(
             None,
             lambda: client.chat.completions.create(
