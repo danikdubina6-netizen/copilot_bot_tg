@@ -212,7 +212,7 @@ async def handle_ai_response(message: types.Message):
         messages_payload.append({"role": "user", "content": user_content})
 
         data = {
-            "model": "meta-llama/llama-3.3-70b-instruct:free", 
+            "model": "google/gemini-3.5-flash-lite-preview-02-05:free", 
             "max_tokens": 1000,
             "messages": messages_payload
         }
@@ -256,8 +256,9 @@ async def handle_ai_response(message: types.Message):
         await message.reply(f"Упс, сетевой сбой: `{e}`", parse_mode="Markdown")
 
 async def main():
-    print(">>> ИИ-бот Copilot с Llama 3.3 успешно запущен! <<<")
+    print(">>> ИИ-бот Copilot запущен на Gemini 3.5 Lite Free! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
