@@ -21,8 +21,12 @@ if GROQ_API_KEY:
 
 BOT_USERNAME = "Copilot_AI2026_bot"
 
-# Точная проверенная модель на Groq
-AI_MODEL = "llama3-8b-8192"
+# Список рабочих моделей Groq в порядке приоритета
+CANDIDATE_MODELS = [
+    "llama-3.1-8b-instant",
+    "llama-3.3-70b-versatile",
+    "mixtral-8x7b-32768"
+]
 
 PERSONAS = {
     "geek": {
@@ -161,41 +165,48 @@ async def handle_ai_response(message: types.Message):
 
     await bot.send_chat_action(chat_id=chat_id, action="typing")
     
-    try:
-        chat_history[chat_id].append({"role": "user", "content": text_content})
-        if len(chat_history[chat_id]) > 10:
-            chat_history[chat_id] = chat_history[chat_id][-10:]
+    chat_history[chat_id].append({"role": "user", "content": text_content})
+    if len(chat_history[chat_id]) > 10:
+        chat_history[chat_id] = chat_history[chat_id][-10:]
 
-        messages_payload = [{"role": "system", "content": current_system_instruction}]
-        messages_payload.extend(chat_history[chat_id])
+    messages_payload = [{"role": "system", "content": current_system_instruction}]
+    messages_payload.extend(chat_history[chat_id])
 
-        if not client:
-            await message.reply("Ошибка: GROQ_API_KEY не найден в Secrets!")
-            return
+    if not client:
+        await message.reply("Ошибка: GROQ_API_KEY не задан в Secrets!")
+        return
 
-        loop = asyncio.get_running_loop()
-        
-        response = await loop.run_in_executor(
-            None,
-            lambda: client.chat.completions.create(
-                model=AI_MODEL,
-                messages=messages_payload,
-                max_tokens=1000
+    loop = asyncio.get_running_loop()
+    reply_text = None
+    last_error = None
+
+    # Перебор доступных моделей
+    for model_name in CANDIDATE_MODELS:
+        try:
+            response = await loop.run_in_executor(
+                None,
+                lambda m=model_name: client.chat.completions.create(
+                    model=m,
+                    messages=messages_payload,
+                    max_tokens=1000
+                )
             )
-        )
+            reply_text = response.choices[0].message.content
+            if reply_text:
+                break
+        except Exception as e:
+            last_error = e
+            logging.warning(f"Модель {model_name} не ответила: {e}")
+            continue
 
-        reply_text = response.choices[0].message.content
-
-        if reply_text:
-            chat_history[chat_id].append({"role": "assistant", "content": reply_text})
-            try:
-                await message.reply(reply_text, parse_mode="Markdown")
-            except Exception:
-                await message.reply(reply_text)
-
-    except Exception as e:
-        logging.error(f"Ошибка API: {e}")
-        await message.reply(f"⚠️ Ошибка API:\n`{e}`", parse_mode="Markdown")
+    if reply_text:
+        chat_history[chat_id].append({"role": "assistant", "content": reply_text})
+        try:
+            await message.reply(reply_text, parse_mode="Markdown")
+        except Exception:
+            await message.reply(reply_text)
+    else:
+        await message.reply(f"⚠️ Ни одна модель не ответила. Ошибка:\n`{last_error}`", parse_mode="Markdown")
 
 async def main():
     print(">>> Copilot AI запущен! <<<")
@@ -203,4 +214,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-        
+    
