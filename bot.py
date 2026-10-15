@@ -65,7 +65,7 @@ async def start_cmd(message: types.Message):
     
     await message.answer(
         "Здарова! Я **Copilot** — твой персональный AI-ассистент. ⚡️🤖\n\n"
-        "Выбирай характер через /mode и кидай задачи. Теперь я умею ставить реакции на чужие сообщения через реплай!",
+        "Выбирай характер через /mode. В группах я молчу и включаюсь только по упоминанию или каждые 15 сообщений!",
         parse_mode="Markdown"
     )
 
@@ -108,20 +108,23 @@ async def handle_ai_response(message: types.Message):
     if chat_type == "private" or getattr(message, "business_connection_id", None):
         should_answer = True
     else:
+        # Условие 1: Реплай именно на сообщение бота (если хотят попросить реакцию или задать вопрос)
         if message.reply_to_message and message.reply_to_message.from_user:
             bot_user = await bot.get_me()
-            # Отвечаем, если реплай на сообщение самого бота ИЛИ если в тексте просят поставить реакцию через реплай на другого
-            if message.reply_to_message.from_user.id == bot_user.id or message.reply_to_message:
+            if message.reply_to_message.from_user.id == bot_user.id:
                 should_answer = True
 
+        # Условие 2: Прямое упоминание юзернейма бота
         if f"@{BOT_USERNAME}".lower() in text_content.lower():
             should_answer = True
             text_content = text_content.replace(f"@{BOT_USERNAME}", "").strip()
 
+        # Условие 3: Счетчик каждых 15 сообщений в группе
         if not should_answer:
             if chat_id not in group_message_counters:
                 group_message_counters[chat_id] = 0
             group_message_counters[chat_id] += 1
+            
             if group_message_counters[chat_id] >= 15:
                 group_message_counters[chat_id] = 0
                 should_answer = True
@@ -129,7 +132,7 @@ async def handle_ai_response(message: types.Message):
     if not should_answer:
         return
 
-    # --- ЛОГИКА РЕАКЦИЙ (ТЕПЕРЬ С ПОДДЕРЖКОЙ РЕПЛАЕВ НА ДРУГИХ) ---
+    # --- ЛОГИКА РЕАКЦИЙ ---
     try:
         lower_text = text_content.lower()
         chosen_emoji = None
@@ -152,8 +155,6 @@ async def handle_ai_response(message: types.Message):
             default_emojis = ["👍", "🔥", "⚡️", "🧠", "👀", "💻"]
             chosen_emoji = random.choice(default_emojis)
 
-        # Определяем, на какое сообщение ставить реакцию:
-        # Если пользователь сделал реплай на чье-то сообщение — ставим туда. Иначе — на сообщение самого пользователя.
         target_message_id = message.reply_to_message.message_id if message.reply_to_message else message.message_id
 
         await bot.set_message_reaction(
@@ -163,7 +164,7 @@ async def handle_ai_response(message: types.Message):
         )
     except Exception as e:
         logging.info(f"Не удалось поставить реакцию: {e}")
-    # -------------------------------------------------------------
+    # ----------------------
 
     if chat_id not in chat_history:
         chat_history[chat_id] = []
@@ -258,7 +259,7 @@ async def handle_ai_response(message: types.Message):
         await message.reply(f"Упс, сетевой сбой: `{e}`", parse_mode="Markdown")
 
 async def main():
-    print(">>> ИИ-бот Copilot (Reactions on Reply + Modes) успешно запущен! <<<")
+    print(">>> ИИ-бот Copilot (No Spam + Counter 15) успешно запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
