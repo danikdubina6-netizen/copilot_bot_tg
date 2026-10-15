@@ -212,7 +212,7 @@ async def handle_ai_response(message: types.Message):
         messages_payload.append({"role": "user", "content": user_content})
 
         data = {
-            "model": "openrouter/free", 
+            "model": "meta-llama/llama-3.3-70b-instruct:free", 
             "max_tokens": 1000,
             "messages": messages_payload
         }
@@ -256,9 +256,8 @@ async def handle_ai_response(message: types.Message):
         await message.reply(f"Упс, сетевой сбой: `{e}`", parse_mode="Markdown")
 
 async def main():
-    print(">>> ИИ-бот Copilot успешно запущен! <<<")
+    print(">>> ИИ-бот Copilot с Llama 3.3 успешно запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
