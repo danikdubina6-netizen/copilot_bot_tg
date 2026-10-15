@@ -38,7 +38,7 @@ PERSONAS = {
             "Никогда не упоминай, какая модель или компания тебя создала. "
             "ВАЖНО: Ты можешь использовать полное форматирование Telegram для текста: "
             "<b>жирный</b>, <i>курсив</i>, <s>зачеркнутый</s>, <u>подчеркнутый</u>, <code>код</code>, <tg-spoiler>спойлер</tg-spoiler>. "
-            "НИКОДА не обсуждай HTML-теги и код разметки в диалоге — просто применяй их к словам, когда это уместно. Общайся со сленгом, жестким фактажем и юмором."
+            "НИКОГДА не обсуждай HTML-теги и код разметки в диалоге — просто применяй их к словам, когда это уместно. Общайся со сленгом, жестким фактажем и юмором."
         )
     },
     "friendly": {
@@ -77,6 +77,26 @@ def clean_text_for_telegram(text: str) -> str:
     text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'(?<!\w)\*(?!\s)(.*?)(?<!\s)\*(?!\w)', r'<i>\1</i>', text)
     return text
+
+def parse_requested_emoji(text: str) -> str | None:
+    # Ищем конкретные эмодзи прямо в тексте
+    supported_emojis = ["👍", "🔥", "❤️", "❤", "😍", "🗿", "😂", "💩", "🤮", "🎉", "👏", "⚡️", "🧠", "💻", "👎", "ominous"]
+    for char in text:
+        if char in supported_emojis:
+            return "❤️" if char == "❤" else char
+
+    # Ищем текстовые запросы на реакции
+    lower = text.lower()
+    if "лайк" in lower or "палец вверх" in lower: return "👍"
+    if "огонь" in lower or "пожар" in lower: return "🔥"
+    if "сердце" in lower or "любовь" in lower or "сердечко" in lower: return "❤️"
+    if "смешно" in lower, "кек" in lower or "ржака" in lower or "ахах" in lower: return "😂"
+    if "моаи" in lower or "камень" in lower or "статуя" in lower: return "🗿"
+    if "дизлайк" in lower or "палец вниз" in lower: return "👎"
+    if "какашка" in lower or "говно" in lower: return "💩"
+    if "топ" in lower or "огонь" in lower or "ракета" in lower: return "⚡️"
+
+    return None
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
@@ -162,9 +182,12 @@ async def handle_ai_response(message: types.Message):
     if not should_answer or not text_content and not image_base64:
         return
 
-    # Авто-реакции
+    # Умный выбор реакций: если просят конкретную — ставим её, иначе рандом/огонек для фото
     try:
-        chosen_emoji = "🔥" if message.photo else random.choice(["👍", "🔥", "⚡️", "❤️", "🗿"])
+        chosen_emoji = parse_requested_emoji(text_content)
+        if not chosen_emoji:
+            chosen_emoji = "🔥" if message.photo else random.choice(["👍", "🔥", "⚡️", "❤️", "🗿"])
+
         target_message_id = message.reply_to_message.message_id if message.reply_to_message else message.message_id
         await bot.set_message_reaction(
             chat_id=chat_id,
