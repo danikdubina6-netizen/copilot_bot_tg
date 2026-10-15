@@ -79,22 +79,20 @@ def clean_text_for_telegram(text: str) -> str:
     return text
 
 def parse_requested_emoji(text: str) -> str | None:
-    # Ищем конкретные эмодзи прямо в тексте
-    supported_emojis = ["👍", "🔥", "❤️", "❤", "😍", "🗿", "😂", "💩", "🤮", "🎉", "👏", "⚡️", "🧠", "💻", "👎", "ominous"]
+    supported_emojis = ["👍", "🔥", "❤️", "❤", "😍", "🗿", "😂", "💩", "🤮", "🎉", "👏", "⚡️", "🧠", "💻", "👎"]
     for char in text:
         if char in supported_emojis:
             return "❤️" if char == "❤" else char
 
-    # Ищем текстовые запросы на реакции
     lower = text.lower()
     if "лайк" in lower or "палец вверх" in lower: return "👍"
     if "огонь" in lower or "пожар" in lower: return "🔥"
     if "сердце" in lower or "любовь" in lower or "сердечко" in lower: return "❤️"
-    if "смешно" in lower, "кек" in lower or "ржака" in lower or "ахах" in lower: return "😂"
+    if "смешно" in lower or "кек" in lower or "ржака" in lower or "ахах" in lower: return "😂"
     if "моаи" in lower or "камень" in lower or "статуя" in lower: return "🗿"
     if "дизлайк" in lower or "палец вниз" in lower: return "👎"
     if "какашка" in lower or "говно" in lower: return "💩"
-    if "топ" in lower or "огонь" in lower or "ракета" in lower: return "⚡️"
+    if "топ" in lower or "ракета" in lower: return "⚡️"
 
     return None
 
@@ -182,7 +180,6 @@ async def handle_ai_response(message: types.Message):
     if not should_answer or not text_content and not image_base64:
         return
 
-    # Умный выбор реакций: если просят конкретную — ставим её, иначе рандом/огонек для фото
     try:
         chosen_emoji = parse_requested_emoji(text_content)
         if not chosen_emoji:
