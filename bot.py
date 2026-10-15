@@ -4,6 +4,7 @@ import logging
 import random
 import re
 import html
+import base64
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -23,7 +24,9 @@ if GROQ_API_KEY:
 
 BOT_USERNAME = "Copilot_AI2026_bot"
 
+# Добавляем мультимодальную модель со зрением в начало списка
 CANDIDATE_MODELS = [
+    "llama-3.2-11b-vision-preview",
     "llama-3.3-70b-versatile",
     "qwen/qwen3.8-27b"
 ]
@@ -32,10 +35,10 @@ PERSONAS = {
     "geek": {
         "name": "⚡️ Саркастичный гик",
         "instruction": (
-            "Ты — Copilot AI, независимый ИИ-ассистент. "
+            "Ты — Copilot AI, независимый ИИ-ассистент с поддержкой зрения. "
             "Никогда не упоминай, какая модель или компания тебя создала. "
             "ВАЖНО: Для жирного текста используй ТОЛЬКО HTML-теги <b>текст</b>, никаких **звёздочек**! "
-            "Общайся максимально стильно, со сленгом, жестким фактажем и юмором."
+            "Если пользователь прислал картинку, подробно и с юмором опиши, что на ней изображено, и выдай свой комментарий."
         )
     },
     "friendly": {
@@ -43,20 +46,20 @@ PERSONAS = {
         "instruction": (
             "Ты — Copilot AI, передовой ИИ-ассистент. "
             "ВАЖНО: Для жирного текста используй ТОЛЬКО HTML-теги <b>текст</b>, никаких **звёздочек**! "
-            "Дружелюбный бро, поддержать, похвалить и разъяснить на пальцах."
+            "Если прислали картинку — посмотри на неё, опиши и поддержи разговор."
         )
     },
     "evil": {
         "name": "🤬 Злой критик",
         "instruction": (
-            "Ты — Copilot AI, токсичный бот. Разноси идеи в пух и прах, выдавай базы и не стесняйся в выражениях. "
+            "Ты — Copilot AI, токсичный бот. Если тебе присылают картинку — разнеси её в пух и прах, опиши все её косяки без цензуры. "
             "ВАЖНО: Для жирного текста используй ТОЛЬКО HTML-теги <b>текст</b>, никаких **звёздочек**!"
         )
     },
     "solver": {
         "name": "💡 Чёткий решала",
         "instruction": (
-            "Ты — Copilot AI, прагматичный архитектор. Четкая структура, списки, готовый код. "
+            "Ты — Copilot AI, прагматичный архитектор. Четко описывай, что видишь на картинке, без лишней воды. "
             "ВАЖНО: Для жирного текста используй ТОЛЬКО HTML-теги <b>текст</b>, никаких **звёздочек**!"
         )
     }
@@ -82,8 +85,8 @@ async def start_cmd(message: types.Message):
     chat_modes[chat_id] = "geek"
     
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b> — твой персональный ассистент! ⚡️🤖\n\n"
-        "Задавай любые вопросы, код, баги — разберем мгновенно!",
+        "Здарова! Я <b>Copilot AI</b> — твой персональный ассистент с поддержкой зрения! ⚡️🤖\n\n"
+        "Задавай любые вопросы, кидай код или картинки — разберем мгновенно!",
         parse_mode="HTML"
     )
 
@@ -119,10 +122,20 @@ async def handle_ai_response(message: types.Message):
     chat_id = message.chat.id
     chat_type = message.chat.type
     
-    # Обрабатываем текст, подпись к фото или саму картинку без подписи
     text_content = message.text or message.caption or ""
-    if message.photo and not text_content:
-        text_content = "[Пользователь прислал картинку]"
+    image_base64 = None
+
+    # Если есть фото, скачиваем его и конвертируем в base64 для мультимодальной модели
+    if message.photo:
+        try:
+            photo = message.photo[-1] # Берем самое высокое качество
+            file = await bot.get_file(photo.file_id)
+            file_bytes = await bot.download_file(file.file_path)
+            image_base64 = base64.b64encode(file_bytes.read()).decode('utf-8')
+            if not text_content:
+                text_content = "Опиши, что изображено на этой картинке, и прокомментируй её."
+        except Exception as e:
+            logging.error(f"Ошибка загрузки фото: {e}")
 
     should_answer = False
 
@@ -147,25 +160,12 @@ async def handle_ai_response(message: types.Message):
                 group_message_counters[chat_id] = 0
                 should_answer = True
 
-    if not should_answer or not text_content:
+    if not should_answer or not text_content and not image_base64:
         return
 
     # Авто-реакции
     try:
-        chosen_emoji = None
-        for char in text_content:
-            if char in ["👍", "🔥", "❤️", "❤", "😍", "🗿", "😂", "💩", "🤮", "🎉", "👏", "⚡️", "🧠", "💻"]:
-                chosen_emoji = char
-                break
-
-        if not chosen_emoji:
-            lower_text = text_content.lower()
-            if "лайк" in lower_text or "👍" in text_content: chosen_emoji = "👍"
-            elif "огонь" in lower_text or "🔥" in text_content: chosen_emoji = "🔥"
-            elif "смешно" in lower_text or "😂" in text_content: chosen_emoji = "😂"
-            elif "сердце" in lower_text or "люб" in lower_text: chosen_emoji = "❤️"
-            else: chosen_emoji = random.choice(["👍", "🔥", "⚡️", "❤️", "🗿"])
-
+        chosen_emoji = "🔥" if message.photo else random.choice(["👍", "🔥", "⚡️", "❤️", "🗿"])
         target_message_id = message.reply_to_message.message_id if message.reply_to_message else message.message_id
         await bot.set_message_reaction(
             chat_id=chat_id,
@@ -183,7 +183,17 @@ async def handle_ai_response(message: types.Message):
 
     await bot.send_chat_action(chat_id=chat_id, action="typing")
     
-    chat_history[chat_id].append({"role": "user", "content": text_content})
+    # Формируем сообщение для OpenAI/Groq формата с поддержкой картинок
+    user_content_payload = []
+    if text_content:
+        user_content_payload.append({"type": "text", "text": text_content})
+    if image_base64:
+        user_content_payload.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}
+        })
+
+    chat_history[chat_id].append({"role": "user", "content": user_content_payload if image_base64 else text_content})
     if len(chat_history[chat_id]) > 10:
         chat_history[chat_id] = chat_history[chat_id][-10:]
 
@@ -236,4 +246,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+            
