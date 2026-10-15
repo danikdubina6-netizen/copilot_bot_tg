@@ -4,8 +4,8 @@ on:
   push:
     branches: [ main, master ]
   schedule:
-    - cron: '*/15 * * * *'  # Запускает workflow каждые 15 минут, чтобы бот не «спал» на бесплатных раннерах
-  workflow_dispatch:        # Позволяет запускать бота вручную из вкладки Actions
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
 
 jobs:
   run-bot:
@@ -23,15 +23,14 @@ jobs:
     - name: Установка зависимостей
       run: |
         python -m pip install --upgrade pip
-        pip install aiogram requests
+        pip install -r requirements.txt
 
     - name: Запуск бота
       env:
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         OPENROUTER_API_KEY_1: ${{ secrets.OPENROUTER_API_KEY_1 }}
-        OPENROUTER_API_KEY_2: ${{ secrets.OPENROUTER_API_KEY_2 }}
-        OPENROUTER_API_KEY_3: ${{ secrets.OPENROUTER_API_KEY_3 }}
-        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        OPENROUTER_API_KEY_2: ${{ secrets.OPENROUTER_API_2 }}
+        OPENROUTER_API_KEY_3: ${{ secrets.OPENROUTER_API_3 }}
       run: |
         python bot.py
         
