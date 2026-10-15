@@ -2,6 +2,7 @@ import os
 import asyncio
 import logging
 import random
+import re
 import html
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
@@ -33,7 +34,7 @@ PERSONAS = {
         "instruction": (
             "Ты — Copilot AI, независимый ИИ-ассистент. "
             "Никогда не упоминай, какая модель или компания тебя создала. "
-            "ВАЖНО: Для выделения жирного текста используй ТОЛЬКО HTML-теги <b>текст</b>. "
+            "ВАЖНО: Для жирного текста используй ТОЛЬКО HTML-теги <b>текст</b>, никаких **звёздочек**! "
             "Общайся максимально стильно, со сленгом, жестким фактажем и юмором."
         )
     },
@@ -41,7 +42,7 @@ PERSONAS = {
         "name": "🤝 Дружелюбный бро",
         "instruction": (
             "Ты — Copilot AI, передовой ИИ-ассистент. "
-            "ВАЖНО: Для выделения жирного текста используй ТОЛЬКО HTML-теги <b>текст</b>. "
+            "ВАЖНО: Для жирного текста используй ТОЛЬКО HTML-теги <b>текст</b>, никаких **звёздочек**! "
             "Дружелюбный бро, поддержать, похвалить и разъяснить на пальцах."
         )
     },
@@ -49,14 +50,14 @@ PERSONAS = {
         "name": "🤬 Злой критик",
         "instruction": (
             "Ты — Copilot AI, токсичный бот. Разноси идеи в пух и прах, выдавай базы и не стесняйся в выражениях. "
-            "ВАЖНО: Для выделения жирного текста используй HTML-теги <b>текст</b>."
+            "ВАЖНО: Для жирного текста используй ТОЛЬКО HTML-теги <b>текст</b>, никаких **звёздочек**!"
         )
     },
     "solver": {
         "name": "💡 Чёткий решала",
         "instruction": (
             "Ты — Copilot AI, прагматичный архитектор. Четкая структура, списки, готовый код. "
-            "ВАЖНО: Для выделения жирного текста используй HTML-теги <b>текст</b>."
+            "ВАЖНО: Для жирного текста используй ТОЛЬКО HTML-теги <b>текст</b>, никаких **звёздочек**!"
         )
     }
 }
@@ -67,6 +68,15 @@ dp = Dispatcher()
 chat_history = {}
 chat_modes = {}
 group_message_counters = {}
+
+def clean_text_for_telegram(text: str) -> str:
+    # Убираем &nbsp; и прочий мусор
+    text = text.replace("&nbsp;", " ")
+    # Если модель всё-таки написала **текст**, конвертируем в <b>текст</b>
+    text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+    # Одиночные звёздочки тоже заменим на курсив или уберем, если мешают
+    text = re.sub(r'(?<!\w)\*(?!\s)(.*?)(?<!\s)\*(?!\w)', r'<i>\1</i>', text)
+    return text
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
@@ -176,8 +186,7 @@ async def handle_ai_response(message: types.Message):
     if len(chat_history[chat_id]) > 10:
         chat_history[chat_id] = chat_history[chat_id][-10:]
 
-    messages_payload = [{"role": "system", "content": current_system_instruction}]
-    messages_payload.extend(chat_history[chat_id])
+(messages_payload := [{"role": "system", "content": current_system_instruction}]).extend(chat_history[chat_id])
 
     if not client:
         await message.reply("Ошибка: GROQ_API_KEY не задан!")
@@ -207,13 +216,14 @@ async def handle_ai_response(message: types.Message):
     if reply_text:
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
         
-        # Безопасная отправка HTML
+        # Чистим текст от звёздочек и мусора прямо перед отправкой
+        processed_text = clean_text_for_telegram(reply_text)
+
         try:
-            await message.reply(reply_text, parse_mode="HTML")
+            await message.reply(processed_text, parse_mode="HTML")
         except Exception:
-            safe_text = html.escape(reply_text).replace("&lt;b&gt;", "<b>").replace("&lt;/b&gt;", "</b>")
             try:
-                await message.reply(safe_text, parse_mode="HTML")
+                await message.reply(html.escape(processed_text), parse_mode="HTML")
             except Exception:
                 await message.reply(reply_text)
     else:
@@ -225,4 +235,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-        
+    
