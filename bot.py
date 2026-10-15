@@ -12,13 +12,23 @@ logging.basicConfig(level=logging.INFO)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
-# Собираем три твоих ключа OpenRouter
+# Собираем ключи из переменных окружения (GitHub Secrets)
 OPENROUTER_KEYS = [
     os.getenv("OPENROUTER_API_KEY_1"),
     os.getenv("OPENROUTER_API_KEY_2"),
     os.getenv("OPENROUTER_API_KEY_3")
 ]
 OPENROUTER_KEYS = [k.strip() for k in OPENROUTER_KEYS if k and k.strip()]
+
+# Если секреты не подтянулись, можешь вписать сюда свой рабочий ключ в кавычки для подстраховки:
+if not OPENROUTER_KEYS:
+    OPENROUTER_KEYS = ["sk-or-v1-ТВОЙ_КЛЮЧ_ЕСЛИ_НУЖНО"]
+    OPENROUTER_KEYS = [k for k in OPENROUTER_KEYS if "ТВОЙ_КЛЮЧ" not in k]
+
+# Логируем ключи при старте (показывает первые 6 символов и длину, чтобы проверить видимость)
+for i, k in enumerate(OPENROUTER_KEYS):
+    masked = k[:6] + "..." if len(k) > 6 else "КОРОТКИЙ КЛЮЧ"
+    logging.info(f"🔑 Ключ #{i+1}: {masked} (Длина: {len(k)})")
 
 current_key_index = 0
 
@@ -237,8 +247,7 @@ async def handle_ai_response(message: types.Message):
         reply_text = ""
         last_error = ""
 
-        # Двойной обход: перебираем ключи OPENROUTER_API_KEY_1, 2, 3 и модели
-        for _ in range(len(OPENROUTER_KEYS) if OPENROUTER_KEYS else 1):
+        for _ in range(len(OPENROUTER_KEYS)):
             active_key = get_next_openrouter_key()
             if not active_key:
                 break
@@ -286,16 +295,16 @@ async def handle_ai_response(message: types.Message):
             except Exception:
                 await message.reply(reply_text)
         else:
-            await message.reply(f"Ошибка OpenRouter (все ключи исчерпали лимиты):\n`{last_error}`", parse_mode="Markdown")
+            await message.reply(f"Ошибка OpenRouter (401/Лимиты):\n`{last_error}`", parse_mode="Markdown")
             
     except Exception as e:
-        logging.error(f"Сетевая ошибка: {e}")
+        logging.info(f"Сетевая ошибка: {e}")
         await message.reply(f"Упс, сетевой сбой: `{e}`", parse_mode="Markdown")
 
 async def main():
-    print(f">>> ИИ-бот Copilot запущен через OpenRouter! Активных ключей: {len(OPENROUTER_KEYS)} <<<")
+    print(f">>> ИИ-бот Copilot запущен! Активных ключей: {len(OPENROUTER_KEYS)} <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-        
+            
