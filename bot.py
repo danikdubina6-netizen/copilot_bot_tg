@@ -21,11 +21,10 @@ if GROQ_API_KEY:
 
 BOT_USERNAME = "Copilot_AI2026_bot"
 
-# Список рабочих моделей Groq в порядке приоритета
+# Только 100% актуальные модели Groq без устаревшего хлама
 CANDIDATE_MODELS = [
-    "llama-3.1-8b-instant",
     "llama-3.3-70b-versatile",
-    "mixtral-8x7b-32768"
+    "llama-3.1-8b-instant"
 ]
 
 PERSONAS = {
@@ -180,7 +179,7 @@ async def handle_ai_response(message: types.Message):
     reply_text = None
     last_error = None
 
-    # Перебор доступных моделей
+    # Перебор только актуальных моделей
     for model_name in CANDIDATE_MODELS:
         try:
             response = await loop.run_in_executor(
