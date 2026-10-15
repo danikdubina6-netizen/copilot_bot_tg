@@ -173,8 +173,10 @@ async def handle_ai_response(message: types.Message):
     
     try:
         user_content = []
+        is_photo = False
         
         if message.photo:
+            is_photo = True
             photo = message.photo[-1]
             file_info = await bot.get_file(photo.file_id)
             file_bytes = await bot.download_file(file_info.file_path)
@@ -206,35 +208,52 @@ async def handle_ai_response(message: types.Message):
         }
         
         messages_payload = [{"role": "system", "content": current_system_instruction}]
+        
+        # Перебираем модели: если фотка — берем бесплатную Gemini Flash Lite, если текст — Mistral
+        models_to_try = (
+            ["google/gemini-2.0-flash-lite-preview-02-05:free", "google/gemma-3-27b-it:free"]
+            if is_photo
+            else ["mistralai/mistral-7b-instruct:free", "google/gemma-4-31b-it:free"]
+        )
+
         for hist in chat_history[chat_id][:-1]:
             messages_payload.append(hist)
             
-        messages_payload.append({"role": "user", "content": user_content})
+        if is_photo:
+            messages_payload.append({"role": "user", "content": user_content})
+        else:
+            messages_payload.append({"role": "user", "content": final_prompt})
 
-        data = {
-            "model": "google/gemini-2.5-flash:free", 
-            "max_tokens": 1000,
-            "messages": messages_payload
-        }
-        
         loop = asyncio.get_running_loop()
-        
         response = None
-        for attempt in range(3):
-            response = await loop.run_in_executor(
-                None, 
-                lambda: requests.post("https://openrouter.ai/api/v1/chat/completions", json=data, headers=headers, timeout=30)
-            )
-            if response.status_code != 429:
+        res_json = None
+
+        # Пробуем отправить запрос по очереди в список доступных моделей
+        for model_name in models_to_try:
+            data = {
+                "model": model_name,
+                "max_tokens": 1000,
+                "messages": messages_payload
+            }
+            
+            for attempt in range(2):
+                response = await loop.run_in_executor(
+                    None, 
+                    lambda: requests.post("https://openrouter.ai/api/v1/chat/completions", json=data, headers=headers, timeout=30)
+                )
+                if response.status_code == 200:
+                    break
+                await asyncio.sleep(1)
+            
+            if response and response.status_code == 200:
                 break
-            await asyncio.sleep(2)
-        
+
         try:
-            res_json = response.json()
+            res_json = response.json() if response else None
         except Exception:
             res_json = None
 
-        if response.status_code == 200 and res_json:
+        if response and response.status_code == 200 and res_json:
             reply_text = res_json['choices'][0]['message']['content']
             chat_history[chat_id].append({"role": "assistant", "content": reply_text})
             
@@ -247,18 +266,18 @@ async def handle_ai_response(message: types.Message):
                 error_data = res_json['error']
                 error_text = error_data.get('message', str(error_data)) if isinstance(error_data, dict) else str(error_data)
             else:
-                error_text = response.text if response.text else f"Status code: {response.status_code}"
+                error_text = response.text if response else "Unknown Error"
                 
-            await message.reply(f"Ошибка OpenRouter (`{response.status_code}`):\n`{error_text}`", parse_mode="Markdown")
+            await message.reply(f"Ошибка OpenRouter (`{response.status_code if response else 'No Resp'}`):\n`{error_text}`", parse_mode="Markdown")
             
     except Exception as e:
         logging.error(f"Сетевая ошибка: {e}")
         await message.reply(f"Упс, сетевой сбой: `{e}`", parse_mode="Markdown")
 
 async def main():
-    print(">>> ИИ-бот Copilot с поддержкой Vision (Gemini 2.5 Flash Free) запущен! <<<")
+    print(">>> ИИ-бот Copilot с поддержкой фото (Vision + Auto-Fallback) запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-        
+    
