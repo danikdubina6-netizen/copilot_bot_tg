@@ -2,6 +2,7 @@ import os
 import asyncio
 import logging
 import base64
+import random
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -14,7 +15,6 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 BOT_USERNAME = "Copilot_AI2026_bot"
 
-# Набор доступных личностей/характеров
 PERSONAS = {
     "geek": {
         "name": "⚡️ Саркастичный гик",
@@ -53,22 +53,19 @@ PERSONAS = {
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 
-# Словарь для хранения истории: {chat_id: [messages]}
 chat_history = {}
-# Словарь для хранения текущего режима чата: {chat_id: "geek" / "friendly" / ...}
 chat_modes = {}
-# Счетчик сообщений для групп: {chat_id: count}
 group_message_counters = {}
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
     chat_id = message.chat.id
     chat_history[chat_id] = []
-    chat_modes[chat_id] = "geek"  # по умолчанию саркастичный гик
+    chat_modes[chat_id] = "geek"
     
     await message.answer(
         "Здарова! Я **Copilot** — твой персональный AI-ассистент. ⚡️🤖\n\n"
-        "Теперь я умею подстраиваться под твоё настроение! Выбери мой характер с помощью команды /mode",
+        "Выбирай характер через /mode и кидай задачи или картинки. Теперь я еще и умею ставить реакции по запросу!",
         parse_mode="Markdown"
     )
 
@@ -130,6 +127,37 @@ async def handle_ai_response(message: types.Message):
 
     if not should_answer:
         return
+
+    # --- ЛОГИКА РЕАКЦИЙ ---
+    try:
+        lower_text = text_content.lower()
+        chosen_emoji = None
+        
+        # Проверяем, просит ли пользователь конкретную реакцию в тексте
+        if "лайк" in lower_text or "палец вверх" in lower_text or "👍" in text_content:
+            chosen_emoji = "👍"
+        elif "огонь" in lower_text or "топ" in lower_text or "🔥" in text_content:
+            chosen_emoji = "🔥"
+        elif "сердце" in lower_text or "люблю" in lower_text or "❤️" in text_content:
+            chosen_emoji = "❤️"
+        elif "смешно" in lower_text or "кек" in lower_text or "ржака" in lower_text or "😂" in text_content:
+            chosen_emoji = "😂"
+        elif "палец вниз" in lower_text or "дизлайк" in lower_text or "👎" in text_content:
+            chosen_emoji = "👎"
+        elif "какашка" in lower_text or "💩" in text_content:
+            chosen_emoji = "💩"
+        elif "ракета" in lower_text or "лети" in lower_text or "🚀" in text_content:
+            chosen_emoji = "🚀"
+        else:
+            # Если конкретную не просили, но бот ответил в группе — ставим рандомный крутой смайлик
+            default_emojis = ["👍", "🔥", "⚡️", "🧠", "👀", "💻"]
+            chosen_emoji = random.choice(default_emojis)
+
+        # Ставим реакцию на сообщение пользователя
+        await message.react([types.ReactionTypeEmoji(emoji=chosen_emoji)])
+    except Exception as e:
+        logging.info(f"Не удалось поставить реакцию (возможно, нет прав в группе): {e}")
+    # ----------------------
 
     if chat_id not in chat_history:
         chat_history[chat_id] = []
@@ -224,9 +252,9 @@ async def handle_ai_response(message: types.Message):
         await message.reply(f"Упс, сетевой сбой: `{e}`", parse_mode="Markdown")
 
 async def main():
-    print(">>> ИИ-бот Copilot (Personas + Modes) успешно запущен! <<<")
+    print(">>> ИИ-бот Copilot (Reactions + Modes) успешно запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-        
+    
