@@ -211,8 +211,9 @@ async def handle_ai_response(message: types.Message):
             
         messages_payload.append({"role": "user", "content": user_content})
 
+        # Проверенная и валидная бесплатная модель от Google
         data = {
-            "model": "google/gemini-3.5-flash-lite-preview-02-05:free", 
+            "model": "google/gemini-2.0-flash-exp:free", 
             "max_tokens": 1000,
             "messages": messages_payload
         }
@@ -256,7 +257,7 @@ async def handle_ai_response(message: types.Message):
         await message.reply(f"Упс, сетевой сбой: `{e}`", parse_mode="Markdown")
 
 async def main():
-    print(">>> ИИ-бот Copilot запущен на Gemini 3.5 Lite Free! <<<")
+    print(">>> ИИ-бот Copilot запущен на Gemini 2.0 Flash Exp Free! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
