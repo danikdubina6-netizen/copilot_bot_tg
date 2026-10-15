@@ -119,7 +119,11 @@ async def handle_ai_response(message: types.Message):
     chat_id = message.chat.id
     chat_type = message.chat.type
     
+    # Обрабатываем текст, подпись к фото или саму картинку без подписи
     text_content = message.text or message.caption or ""
+    if message.photo and not text_content:
+        text_content = "[Пользователь прислал картинку]"
+
     should_answer = False
 
     if chat_type == "private" or getattr(message, "business_connection_id", None):
