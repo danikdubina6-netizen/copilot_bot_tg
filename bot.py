@@ -25,9 +25,9 @@ if GROQ_API_KEY:
 BOT_USERNAME = "Copilot_AI2026_bot"
 
 CANDIDATE_MODELS = [
-    "llama-3.2-11b-vision-preview",
     "llama-3.3-70b-versatile",
-    "qwen/qwen3.8-27b"
+    "qwen/qwen3.8-27b",
+    "llama-3.2-11b-vision-preview"
 ]
 
 BASE_INSTRUCTION = (
@@ -74,7 +74,7 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b>. Кидай мемы и код, погнали! ⚡️🤖",
+        "Здарова! Я <b>Copilot AI</b>. Экономим токены, погнали! ⚡️🤖",
         parse_mode="HTML"
     )
 
@@ -83,7 +83,7 @@ async def reset_cmd(message: types.Message):
     chat_id = message.chat.id
     chat_history[chat_id] = []
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
-    await message.reply("🧠 Память стерта. Лимиты картинок сброшены!")
+    await message.reply("🧠 Память очищена, лимиты отдохнут!")
 
 @dp.message()
 async def handle_ai_response(message: types.Message):
@@ -166,10 +166,11 @@ async def handle_ai_response(message: types.Message):
         })
 
     chat_history[chat_id].append({"role": "user", "content": user_content_payload if image_base64 else text_content})
-    if len(chat_history[chat_id]) > 10:
-        chat_history[chat_id] = chat_history[chat_id][-10:]
+    
+    # Жестко экономим токены: держим в памяти не больше последних 4 сообщений
+    if len(chat_history[chat_id]) > 4:
+        chat_history[chat_id] = chat_history[chat_id][-4:]
 
-    # Фикс: очищаем старые картинки из истории, чтобы модель не ловила лимит 3+ картинок
     sanitized_history = []
     for msg in chat_history[chat_id]:
         if isinstance(msg["content"], list):
@@ -191,6 +192,7 @@ async def handle_ai_response(message: types.Message):
     reply_text = None
     last_error = None
 
+    # Перебираем модели по очереди, если какая-то улетела в блок по лимиту (429)
     for model_name in CANDIDATE_MODELS:
         try:
             response = await loop.run_in_executor(
@@ -198,7 +200,7 @@ async def handle_ai_response(message: types.Message):
                 lambda m=model_name: client.chat.completions.create(
                     model=m,
                     messages=messages_payload,
-                    max_tokens=1000
+                    max_tokens=800
                 )
             )
             reply_text = response.choices[0].message.content
@@ -206,6 +208,7 @@ async def handle_ai_response(message: types.Message):
                 break
         except Exception as e:
             last_error = e
+            logging.warning(f"Модель {model_name} словила лимит/ошибку: {e}")
             continue
 
     if reply_text:
@@ -221,7 +224,11 @@ async def handle_ai_response(message: types.Message):
             except Exception:
                 await message.reply(reply_text)
     else:
-        await message.reply(f"⚠️ Ошибка API:\n<code>{last_error}</code>", parse_mode="HTML")
+        await message.reply(
+            "⚠️ <b>Лимит бесплатных токенов Groq исчерпан!</b>[span_1](start_span)[span_1](end_span)\n"
+            "Подожди пару минут или сделай /reset. (Ошибка лимита запросов в сутки)",
+            parse_mode="HTML"
+        )
 
 async def main():
     print(">>> Copilot AI запущен! <<<")
@@ -229,4 +236,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-        
+            
