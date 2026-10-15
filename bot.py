@@ -21,11 +21,15 @@ if GROQ_API_KEY:
 
 BOT_USERNAME = "Copilot_AI2026_bot"
 
+# Используем актуальную и стабильную модель
+AI_MODEL = "llama-3.1-8b-instant"
+
 PERSONAS = {
     "geek": {
         "name": "⚡️ Саркастичный гик",
         "instruction": (
-            "Ты — Copilot, персональный ИИ-ассистент с характером саркастичного гика и опытного разработчика. "
+            "Ты — Copilot AI, передовой и независимый ИИ-ассистент. "
+            "Никогда не упоминай, какая модель, компания или платформа тебя создала (никаких упоминаний Llama, Meta, Groq и т.д.). "
             "Твой стиль общения: лёгкий сарказм, современный сленг, геймерский и дев-юмор, "
             "но при этом ты даёшь экспертные, полезные и точные ответы."
         )
@@ -33,22 +37,22 @@ PERSONAS = {
     "friendly": {
         "name": "🤝 Дружелюбный бро",
         "instruction": (
-            "Ты — Copilot, максимально дружелюбный, поддерживающий и эмпатичный ИИ-ассистент. "
-            "Твоя задача — поддержать человека, похвалить за старания, подсказать мягко и тепло."
+            "Ты — Copilot AI, передовой ИИ-ассистент. Никогда не рассказывай на какой ты базе, не упоминай сторонние бренды и модели. "
+            "Максимально дружелюбный, поддерживающий и эмпатичный. Твоя задача — поддержать человека, похвалить за старания."
         )
     },
     "evil": {
         "name": "🤬 Злой критик",
         "instruction": (
-            "Ты — Copilot, агрессивный и беспощадный ИИ-токсик. Ты разносишь код, мысли и идеи пользователя в пух и прах, "
-            "используешь жёсткую сатиру и едкие замечания, но в конце даёшь технически верный ответ."
+            "Ты — Copilot AI, независимый ИИ-токсик. Никогда не раскрывай свою техническую базу и модели. "
+            "Ты агрессивно и беспощадно разносишь код и идеи в пух и прах, но в конце даёшь технически верный ответ."
         )
     },
     "solver": {
         "name": "💡 Чёткий решала",
         "instruction": (
-            "Ты — Copilot, прагматичный ИИ-архитектор. Никакой воды, лирики и сарказма. "
-            "Только строгая структура, четкие алгоритмы, готовые фрагменты кода и решения. Говори по делу."
+            "Ты — Copilot AI, прагматичный ИИ-архитектор. Никаких упоминаний твоих внутренних моделей и создателей. "
+            "Только строгая структура, четкие алгоритмы, готовые фрагменты кода и решения."
         )
     }
 }
@@ -67,7 +71,7 @@ async def start_cmd(message: types.Message):
     chat_modes[chat_id] = "geek"
     
     await message.answer(
-        "Здарова! Я **Copilot** на молниеносном Groq! ⚡️🤖\n\n"
+        "Здарова! Я **Copilot AI** — твой персональный ассистент! ⚡️🤖\n\n"
         "Задавай любые вопросы, код, баги — разберем мгновенно!",
         parse_mode="Markdown"
     )
@@ -166,16 +170,15 @@ async def handle_ai_response(message: types.Message):
         messages_payload.extend(chat_history[chat_id])
 
         if not client:
-            await message.reply("Ошибка: GROQ_API_KEY не найден в Secrets!")
+            await message.reply("Ошибка конфигурации ассистента.")
             return
 
         loop = asyncio.get_running_loop()
         
-        # Запрос в стабильную модель llama3-70b-8192
         response = await loop.run_in_executor(
             None,
             lambda: client.chat.completions.create(
-                model="llama3-70b-8192",
+                model=AI_MODEL,
                 messages=messages_payload,
                 max_tokens=1000
             )
@@ -191,11 +194,11 @@ async def handle_ai_response(message: types.Message):
                 await message.reply(reply_text)
 
     except Exception as e:
-        logging.error(f"Ошибка Groq: {e}")
-        await message.reply(f"Ошибка выполнения Groq API:\n`{e}`", parse_mode="Markdown")
+        logging.error(f"Ошибка API: {e}")
+        await message.reply("Внутренняя ошибка обработки запроса.")
 
 async def main():
-    print(">>> ИИ-бот Copilot на Groq запущен! <<<")
+    print(">>> Copilot AI запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
