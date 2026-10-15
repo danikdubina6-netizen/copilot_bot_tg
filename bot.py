@@ -64,8 +64,8 @@ async def start_cmd(message: types.Message):
     chat_modes[chat_id] = "geek"
     
     await message.answer(
-        "Здарова! Я **Copilot** — твой персональный AI-ассистент. ⚡️🤖\n\n"
-        "Выбирай характер через /mode. В группах я молчу и включаюсь только по упоминанию или каждые 15 сообщений!",
+        "Здарова! Я **Copilot** — твой персональный AI-ассистент с характером. ⚡️🤖\n\n"
+        "Задавай любые вопросы по коду, технологиям или жизни, кидай картинки — разберёмся со всем!",
         parse_mode="Markdown"
     )
 
@@ -108,18 +108,15 @@ async def handle_ai_response(message: types.Message):
     if chat_type == "private" or getattr(message, "business_connection_id", None):
         should_answer = True
     else:
-        # Условие 1: Реплай именно на сообщение бота (если хотят попросить реакцию или задать вопрос)
         if message.reply_to_message and message.reply_to_message.from_user:
             bot_user = await bot.get_me()
             if message.reply_to_message.from_user.id == bot_user.id:
                 should_answer = True
 
-        # Условие 2: Прямое упоминание юзернейма бота
         if f"@{BOT_USERNAME}".lower() in text_content.lower():
             should_answer = True
             text_content = text_content.replace(f"@{BOT_USERNAME}", "").strip()
 
-        # Условие 3: Счетчик каждых 15 сообщений в группе
         if not should_answer:
             if chat_id not in group_message_counters:
                 group_message_counters[chat_id] = 0
@@ -215,7 +212,7 @@ async def handle_ai_response(message: types.Message):
         messages_payload.append({"role": "user", "content": user_content})
 
         data = {
-            "model": "google/gemini-2.5-flash", 
+            "model": "openrouter/free", 
             "max_tokens": 1000,
             "messages": messages_payload
         }
@@ -259,7 +256,7 @@ async def handle_ai_response(message: types.Message):
         await message.reply(f"Упс, сетевой сбой: `{e}`", parse_mode="Markdown")
 
 async def main():
-    print(">>> ИИ-бот Copilot (No Spam + Counter 15) успешно запущен! <<<")
+    print(">>> ИИ-бот Copilot успешно запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
