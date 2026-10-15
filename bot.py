@@ -70,11 +70,8 @@ chat_modes = {}
 group_message_counters = {}
 
 def clean_text_for_telegram(text: str) -> str:
-    # Убираем &nbsp; и прочий мусор
     text = text.replace("&nbsp;", " ")
-    # Если модель всё-таки написала **текст**, конвертируем в <b>текст</b>
     text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
-    # Одиночные звёздочки тоже заменим на курсив или уберем, если мешают
     text = re.sub(r'(?<!\w)\*(?!\s)(.*?)(?<!\s)\*(?!\w)', r'<i>\1</i>', text)
     return text
 
@@ -186,7 +183,8 @@ async def handle_ai_response(message: types.Message):
     if len(chat_history[chat_id]) > 10:
         chat_history[chat_id] = chat_history[chat_id][-10:]
 
-(messages_payload := [{"role": "system", "content": current_system_instruction}]).extend(chat_history[chat_id])
+    messages_payload = [{"role": "system", "content": current_system_instruction}]
+    messages_payload.extend(chat_history[chat_id])
 
     if not client:
         await message.reply("Ошибка: GROQ_API_KEY не задан!")
@@ -216,7 +214,6 @@ async def handle_ai_response(message: types.Message):
     if reply_text:
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
         
-        # Чистим текст от звёздочек и мусора прямо перед отправкой
         processed_text = clean_text_for_telegram(reply_text)
 
         try:
