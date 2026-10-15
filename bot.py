@@ -11,7 +11,27 @@ import requests
 logging.basicConfig(level=logging.INFO)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+
+# Собираем все три независимых ключа OpenRouter
+OPENROUTER_KEYS = [
+    os.getenv("OPENROUTER_API_KEY_1"),
+    os.getenv("OPENROUTER_API_KEY_2"),
+    os.getenv("OPENROUTER_API_KEY_3")
+]
+OPENROUTER_KEYS = [k.strip() for k in OPENROUTER_KEYS if k and k.strip()]
+
+# Ключ специально для Google Gemini (если есть отдельно, или используем первый из секретов)
+GEMINI_KEY = os.getenv("GEMINI_API_KEY") or (OPENROUTER_KEYS[0] if OPENROUTER_KEYS else "")
+
+current_key_index = 0
+
+def get_next_openrouter_key():
+    global current_key_index
+    if not OPENROUTER_KEYS:
+        return None
+    key = OPENROUTER_KEYS[current_key_index]
+    current_key_index = (current_key_index + 1) % len(OPENROUTER_KEYS)
+    return key
 
 BOT_USERNAME = "Copilot_AI2026_bot"
 
@@ -174,6 +194,7 @@ async def handle_ai_response(message: types.Message):
     try:
         user_content = []
         is_photo = False
+        base64_image = None
         
         if message.photo:
             is_photo = True
@@ -200,83 +221,116 @@ async def handle_ai_response(message: types.Message):
         if len(chat_history[chat_id]) > 10:
             chat_history[chat_id] = chat_history[chat_id][-10:]
 
-        headers = {
-            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-            "HTTP-Referer": "https://github.com/telegram-bot",
-            "X-Title": "Copilot Telegram Bot",
-            "Content-Type": "application/json"
-        }
-        
-        messages_payload = [{"role": "system", "content": current_system_instruction}]
-        
-        # ТОЛЬКО СТАБИЛЬНЫЕ НЕ-GEMINI ФРИШКИ
-        models_to_try = (
-            ["qwen/qwen-2.5-vl-72b-instruct:free", "meta-llama/llama-3.2-11b-vision-instruct:free"]
-            if is_photo
-            else ["mistralai/mistral-7b-instruct:free", "qwen/qwen-2.5-72b-instruct:free"]
-        )
-
-        for hist in chat_history[chat_id][:-1]:
-            messages_payload.append(hist)
-            
-        if is_photo:
-            messages_payload.append({"role": "user", "content": user_content})
-        else:
-            messages_payload.append({"role": "user", "content": final_prompt})
-
         loop = asyncio.get_running_loop()
         response = None
         res_json = None
+        success = False
+        reply_text = ""
 
-        for model_name in models_to_try:
-            data = {
-                "model": model_name,
-                "max_tokens": 1000,
-                "messages": messages_payload
-            }
-            
+        # 1. Сначала пробуем запросить через Gemini 3.5 Flash (нативный API)
+        if GEMINI_KEY:
             try:
-                response = await loop.run_in_executor(
-                    None, 
-                    lambda: requests.post("https://openrouter.ai/api/v1/chat/completions", json=data, headers=headers, timeout=30)
+                gemini_parts = []
+                if is_photo and base64_image:
+                    gemini_parts.append({
+                        "inline_data": {
+                            "mime_type": "image/jpeg",
+                            "data": base64_image
+                        }
+                    })
+                gemini_parts.append({"text": final_prompt})
+
+                gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={GEMINI_KEY}"
+                gemini_payload = {
+                    "system_instruction": {"parts": [{"text": current_system_instruction}]},
+                    "contents": [{"role": "user", "parts": gemini_parts}]
+                }
+
+                gem_resp = await loop.run_in_executor(
+                    None,
+                    lambda: requests.post(gemini_url, json=gemini_payload, headers={"Content-Type": "application/json"}, timeout=20)
                 )
-                if response and response.status_code == 200:
+
+                if gem_resp.status_code == 200:
+                    gem_data = gem_resp.json()
+                    if "candidates" in gem_data:
+                        reply_text = gem_data["candidates"][0]["content"]["parts"][0]["text"]
+                        success = True
+            except Exception as g_err:
+                logging.info(f"Gemini 3.5 пропустили из-за ошибки: {g_err}")
+
+        # 2. Если Gemini не ответил, подключаем ротацию ключей OpenRouter и резервные модели
+        if not success:
+            messages_payload = [{"role": "system", "content": current_system_instruction}]
+            for hist in chat_history[chat_id][:-1]:
+                messages_payload.append(hist)
+                
+            if is_photo:
+                messages_payload.append({"role": "user", "content": user_content})
+            else:
+                messages_payload.append({"role": "user", "content": final_prompt})
+
+            models_to_try = (
+                ["qwen/qwen-2.5-vl-72b-instruct:free"]
+                if is_photo
+                else ["mistralai/mistral-7b-instruct:free", "qwen/qwen-2.5-72b-instruct:free"]
+            )
+
+            for _ in range(len(OPENROUTER_KEYS) if OPENROUTER_KEYS else 1):
+                active_key = get_next_openrouter_key()
+                if not active_key:
                     break
-            except Exception as req_err:
-                logging.error(f"Ошибка запроса к {model_name}: {req_err}")
-            
-            await asyncio.sleep(1)
 
-        try:
-            res_json = response.json() if response else None
-        except Exception:
-            res_json = None
+                headers = {
+                    "Authorization": f"Bearer {active_key}",
+                    "HTTP-Referer": "https://github.com/telegram-bot",
+                    "X-Title": "Copilot Telegram Bot",
+                    "Content-Type": "application/json"
+                }
 
-        if response and response.status_code == 200 and res_json and 'choices' in res_json:
-            reply_text = res_json['choices'][0]['message']['content']
+                for model_name in models_to_try:
+                    data = {
+                        "model": model_name,
+                        "max_tokens": 1000,
+                        "messages": messages_payload
+                    }
+                    
+                    try:
+                        response = await loop.run_in_executor(
+                            None, 
+                            lambda: requests.post("https://openrouter.ai/api/v1/chat/completions", json=data, headers=headers, timeout=20)
+                        )
+                        if response and response.status_code == 200:
+                            res_json = response.json()
+                            if 'choices' in res_json:
+                                reply_text = res_json['choices'][0]['message']['content']
+                                success = True
+                                break
+                    except Exception as req_err:
+                        logging.error(f"Ошибка запроса OpenRouter: {req_err}")
+                    
+                    await asyncio.sleep(0.5)
+
+                if success:
+                    break
+
+        if success and reply_text:
             chat_history[chat_id].append({"role": "assistant", "content": reply_text})
-            
             try:
                 await message.reply(reply_text, parse_mode="Markdown")
             except Exception:
                 await message.reply(reply_text)
         else:
-            if isinstance(res_json, dict) and 'error' in res_json:
-                error_data = res_json['error']
-                error_text = error_data.get('message', str(error_data)) if isinstance(error_data, dict) else str(error_data)
-            else:
-                error_text = response.text if response else "Сервер OpenRouter не ответил"
-                
-            await message.reply(f"Ошибка OpenRouter (`{response.status_code if response else 'Timeout'}`):\n`{error_text}`", parse_mode="Markdown")
+            await message.reply("Ошибка: все ключи и резервные модели исчерпали лимиты или недоступны.", parse_mode="Markdown")
             
     except Exception as e:
         logging.error(f"Сетевая ошибка: {e}")
         await message.reply(f"Упс, сетевой сбой: `{e}`", parse_mode="Markdown")
 
 async def main():
-    print(">>> ИИ-бот Copilot запущен (Qwen/Mistral No-Gemini Build)! <<<")
+    print(f">>> ИИ-бот Copilot запущен (Gemini 3.5 + Multi-Key OpenRouter)! Ключей: {len(OPENROUTER_KEYS)} <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-            
+    
