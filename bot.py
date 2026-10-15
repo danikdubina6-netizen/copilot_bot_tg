@@ -1,43 +1,23 @@
 import os
 import asyncio
 import logging
-import base64
 import random
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-import requests
+from openai import OpenAI
 
 logging.basicConfig(level=logging.INFO)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# Собираем ключи из переменных окружения (GitHub Secrets)
-OPENROUTER_KEYS = [
-    os.getenv("OPENROUTER_API_KEY_1"),
-    os.getenv("OPENROUTER_API_KEY_2"),
-    os.getenv("OPENROUTER_API_KEY_3")
-]
-OPENROUTER_KEYS = [k.strip() for k in OPENROUTER_KEYS if k and k.strip() and k != "None"]
-
-# СТРАХОВКА: если переменные окружения из GitHub Secrets пустые, 
-# впиши свой рабочий ключ сюда прямо в кавычки, чтобы бот не выдавал 401:
-if not OPENROUTER_KEYS:
-    OPENROUTER_KEYS = [
-        "sk-or-v1-сюда_вставь_свой_рабочий_ключ"
-    ]
-    # Убираем дефолтный текст, если пользователь его не заменил
-    OPENROUTER_KEYS = [k for k in OPENROUTER_KEYS if "сюда_вставь" not in k]
-
-current_key_index = 0
-
-def get_next_openrouter_key():
-    global current_key_index
-    if not OPENROUTER_KEYS:
-        return None
-    key = OPENROUTER_KEYS[current_key_index]
-    current_key_index = (current_key_index + 1) % len(OPENROUTER_KEYS)
-    return key
+client = None
+if GROQ_API_KEY:
+    client = OpenAI(
+        base_url="https://api.groq.com/openai/v1",
+        api_key=GROQ_API_KEY
+    )
 
 BOT_USERNAME = "Copilot_AI2026_bot"
 
@@ -47,31 +27,28 @@ PERSONAS = {
         "instruction": (
             "Ты — Copilot, персональный ИИ-ассистент с характером саркастичного гика и опытного разработчика. "
             "Твой стиль общения: лёгкий сарказм, современный сленг, геймерский и дев-юмор, "
-            "но при этом ты даёшь экспертные, полезные и точные ответы. Не называй сторонние нейросети."
+            "но при этом ты даёшь экспертные, полезные и точные ответы."
         )
     },
     "friendly": {
         "name": "🤝 Дружелюбный бро",
         "instruction": (
             "Ты — Copilot, максимально дружелюбный, поддерживающий и эмпатичный ИИ-ассистент. "
-            "Твоя задача — поддержать человека, похвалить за старания, подсказать мягко и тепло, "
-            "создать уютную атмосферу. Отвечай позитивно и на языке пользователя."
+            "Твоя задача — поддержать человека, похвалить за старания, подсказать мягко и тепло."
         )
     },
     "evil": {
         "name": "🤬 Злой критик",
         "instruction": (
             "Ты — Copilot, агрессивный и беспощадный ИИ-токсик. Ты разносишь код, мысли и идеи пользователя в пух и прах, "
-            "используешь жёсткую сатиру и едкие замечания, но в конце всё же даёшь технически верный ответ, "
-            "заворачивая его в порцию знатной критики. Не будь слишком мягким."
+            "используешь жёсткую сатиру и едкие замечания, но в конце даёшь технически верный ответ."
         )
     },
     "solver": {
         "name": "💡 Чёткий решала",
         "instruction": (
             "Ты — Copilot, прагматичный ИИ-архитектор. Никакой воды, лирики и сарказма. "
-            "Только строгая структура, четкие алгоритмы, готовые фрагменты кода и максимально эффективные решения задач. "
-            "Говори по делу."
+            "Только строгая структура, четкие алгоритмы, готовые фрагменты кода и решения. Говори по делу."
         )
     }
 }
@@ -90,8 +67,8 @@ async def start_cmd(message: types.Message):
     chat_modes[chat_id] = "geek"
     
     await message.answer(
-        "Здарова! Я **Copilot** — твой персональный AI-ассистент с характером. ⚡️🤖\n\n"
-        "Задавай любые вопросы по коду, технологиям или жизни, кидай картинки — разберёмся со всем!",
+        "Здарова! Я **Copilot** на молниеносном Groq! ⚡️🤖\n\n"
+        "Задавай любые вопросы, код, баги — разберем мгновенно!",
         parse_mode="Markdown"
     )
 
@@ -152,42 +129,25 @@ async def handle_ai_response(message: types.Message):
                 group_message_counters[chat_id] = 0
                 should_answer = True
 
-    if not should_answer:
+    if not should_answer or not text_content:
         return
 
-    # --- ЛОГИКА РЕАКЦИЙ ---
+    # Авто-реакции на сообщения
     try:
         lower_text = text_content.lower()
-        chosen_emoji = None
-        
-        if "лайк" in lower_text or "палец вверх" in lower_text or "👍" in text_content:
-            chosen_emoji = "👍"
-        elif "огонь" in lower_text or "топ" in lower_text or "🔥" in text_content:
-            chosen_emoji = "🔥"
-        elif "сердце" in lower_text or "люблю" in lower_text or "❤️" in text_content:
-            chosen_emoji = "❤️"
-        elif "смешно" in lower_text or "кек" in lower_text or "ржака" in lower_text or "😂" in text_content:
-            chosen_emoji = "😂"
-        elif "палец вниз" in lower_text or "дизлайк" in lower_text or "👎" in text_content:
-            chosen_emoji = "👎"
-        elif "какашка" in lower_text or "💩" in text_content:
-            chosen_emoji = "💩"
-        elif "ракета" in lower_text or "лети" in lower_text or "🚀" in text_content:
-            chosen_emoji = "🚀"
-        else:
-            default_emojis = ["👍", "🔥", "⚡️", "🧠", "👀", "💻"]
-            chosen_emoji = random.choice(default_emojis)
+        if "лайк" in lower_text or "👍" in text_content: chosen_emoji = "👍"
+        elif "огонь" in lower_text or "🔥" in text_content: chosen_emoji = "🔥"
+        elif "смешно" in lower_text or "😂" in text_content: chosen_emoji = "😂"
+        else: chosen_emoji = random.choice(["👍", "🔥", "⚡️", "🧠", "💻"])
 
         target_message_id = message.reply_to_message.message_id if message.reply_to_message else message.message_id
-
         await bot.set_message_reaction(
             chat_id=chat_id,
             message_id=target_message_id,
             reaction=[types.ReactionTypeEmoji(emoji=chosen_emoji)]
         )
-    except Exception as e:
-        logging.info(f"Не удалось поставить реакцию: {e}")
-    # ----------------------
+    except Exception:
+        pass
 
     if chat_id not in chat_history:
         chat_history[chat_id] = []
@@ -198,112 +158,46 @@ async def handle_ai_response(message: types.Message):
     await bot.send_chat_action(chat_id=chat_id, action="typing")
     
     try:
-        user_content = []
-        is_photo = False
-        
-        if message.photo:
-            is_photo = True
-            photo = message.photo[-1]
-            file_info = await bot.get_file(photo.file_id)
-            file_bytes = await bot.download_file(file_info.file_path)
-            base64_image = base64.b64encode(file_bytes.read()).decode('utf-8')
-            
-            user_content.append({
-                "type": "image_url",
-                "image_url": {
-                    "url": f"data:image/jpeg;base64,{base64_image}"
-                }
-            })
-
-        final_prompt = text_content if text_content else "Прокомментируй это."
-        user_content.append({
-            "type": "text",
-            "text": final_prompt
-        })
-
-        chat_history[chat_id].append({"role": "user", "content": final_prompt})
-        
+        chat_history[chat_id].append({"role": "user", "content": text_content})
         if len(chat_history[chat_id]) > 10:
             chat_history[chat_id] = chat_history[chat_id][-10:]
 
         messages_payload = [{"role": "system", "content": current_system_instruction}]
-        for hist in chat_history[chat_id][:-1]:
-            messages_payload.append(hist)
-            
-        if is_photo:
-            messages_payload.append({"role": "user", "content": user_content})
-        else:
-            messages_payload.append({"role": "user", "content": final_prompt})
+        messages_payload.extend(chat_history[chat_id])
 
-        models_to_try = (
-            ["qwen/qwen-2.5-vl-72b-instruct:free"]
-            if is_photo
-            else ["mistralai/mistral-7b-instruct:free", "qwen/qwen-2.5-72b-instruct:free"]
-        )
+        if not client:
+            await message.reply("Ошибка: GROQ_API_KEY не найден в Secrets!")
+            return
 
         loop = asyncio.get_running_loop()
-        success = False
-        reply_text = ""
-        last_error = ""
+        
+        # Отправляем запрос в модель Llama 3.3 70B
+        response = await loop.run_in_executor(
+            None,
+            lambda: client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=messages_payload,
+                max_tokens=1000
+            )
+        )
 
-        for _ in range(len(OPENROUTER_KEYS) if OPENROUTER_KEYS else 1):
-            active_key = get_next_openrouter_key()
-            if not active_key:
-                break
+        reply_text = response.choices[0].message.content
 
-            headers = {
-                "Authorization": f"Bearer {active_key}",
-                "HTTP-Referer": "https://github.com/telegram-bot",
-                "X-Title": "Copilot Telegram Bot",
-                "Content-Type": "application/json"
-            }
-
-            for model_name in models_to_try:
-                data = {
-                    "model": model_name,
-                    "max_tokens": 1000,
-                    "messages": messages_payload
-                }
-                
-                try:
-                    response = await loop.run_in_executor(
-                        None, 
-                        lambda: requests.post("https://openrouter.ai/api/v1/chat/completions", json=data, headers=headers, timeout=30)
-                    )
-                    
-                    if response.status_code == 200:
-                        res_json = response.json()
-                        if 'choices' in res_json:
-                            reply_text = res_json['choices'][0]['message']['content']
-                            success = True
-                            break
-                    else:
-                        last_error = response.text
-                except Exception as req_err:
-                    last_error = str(req_err)
-
-                await asyncio.sleep(0.5)
-
-            if success:
-                break
-
-        if success and reply_text:
+        if reply_text:
             chat_history[chat_id].append({"role": "assistant", "content": reply_text})
             try:
                 await message.reply(reply_text, parse_mode="Markdown")
             except Exception:
                 await message.reply(reply_text)
-        else:
-            await message.reply(f"Ошибка OpenRouter (401/Лимиты):\n`{last_error}`", parse_mode="Markdown")
-            
+
     except Exception as e:
-        logging.info(f"Сетевая ошибка: {e}")
-        await message.reply(f"Упс, сетевой сбой: `{e}`", parse_mode="Markdown")
+        logging.error(f"Ошибка Groq: {e}")
+        await message.reply(f"Ошибка выполнения Groq API:\n`{e}`", parse_mode="Markdown")
 
 async def main():
-    print(f">>> ИИ-бот Copilot запущен! Активных ключей: {len(OPENROUTER_KEYS)} <<<")
+    print(">>> ИИ-бот Copilot на Groq запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-                
+    
