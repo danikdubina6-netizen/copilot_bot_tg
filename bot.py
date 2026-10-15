@@ -142,13 +142,21 @@ async def handle_ai_response(message: types.Message):
     if not should_answer or not text_content:
         return
 
-    # Авто-реакции
+    # Авто-реакции и точный парсинг эмодзи из текста
     try:
-        lower_text = text_content.lower()
-        if "лайк" in lower_text or "👍" in text_content: chosen_emoji = "👍"
-        elif "огонь" in lower_text or "🔥" in text_content: chosen_emoji = "🔥"
-        elif "смешно" in lower_text or "😂" in text_content: chosen_emoji = "😂"
-        else: chosen_emoji = random.choice(["👍", "🔥", "⚡️", "🧠", "💻"])
+        chosen_emoji = None
+        for char in text_content:
+            if char in ["👍", "🔥", "❤️", "❤", "😍", "🗿", "😂", "💩", "🤮", "🎉", "👏", "⚡️", "🧠", "💻"]:
+                chosen_emoji = char
+                break
+
+        if not chosen_emoji:
+            lower_text = text_content.lower()
+            if "лайк" in lower_text or "👍" in text_content: chosen_emoji = "👍"
+            elif "огонь" in lower_text or "🔥" in text_content: chosen_emoji = "🔥"
+            elif "смешно" in lower_text or "😂" in text_content: chosen_emoji = "😂"
+            elif "сердце" in lower_text or "люб" in lower_text: chosen_emoji = "❤️"
+            else: chosen_emoji = random.choice(["👍", "🔥", "⚡️", "❤️", "🗿"])
 
         target_message_id = message.reply_to_message.message_id if message.reply_to_message else message.message_id
         await bot.set_message_reaction(
@@ -156,7 +164,8 @@ async def handle_ai_response(message: types.Message):
             message_id=target_message_id,
             reaction=[types.ReactionTypeEmoji(emoji=chosen_emoji)]
         )
-    except Exception:
+    except Exception as e:
+        logging.error(f"Ошибка установки реакции: {e}")
         pass
 
     if chat_id not in chat_history:
@@ -202,10 +211,8 @@ async def handle_ai_response(message: types.Message):
     if reply_text:
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
         try:
-            # Используем HTML формат вместо Markdown, чтобы жирный текст работал стабильно
             await message.reply(reply_text, parse_mode="HTML")
         except Exception:
-            # Если в тексте есть неэкранированные спецсимволы HTML, отправляем как есть
             await message.reply(reply_text)
     else:
         await message.reply(f"⚠️ Ошибка API:\n<code>{last_error}</code>", parse_mode="HTML")
