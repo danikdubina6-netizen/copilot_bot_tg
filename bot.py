@@ -21,10 +21,10 @@ if GROQ_API_KEY:
 
 BOT_USERNAME = "Copilot_AI2026_bot"
 
-# Только 100% актуальные модели Groq без устаревшего хлама
+# Основная модель — твой Qwen, плюс запасной вариант
 CANDIDATE_MODELS = [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant"
+    "qwen/qwen3.8-27b",
+    "llama-3.3-70b-versatile"
 ]
 
 PERSONAS = {
@@ -139,7 +139,7 @@ async def handle_ai_response(message: types.Message):
     if not should_answer or not text_content:
         return
 
-    # Авто-реакции на сообщения
+    # Авто-реакции
     try:
         lower_text = text_content.lower()
         if "лайк" in lower_text or "👍" in text_content: chosen_emoji = "👍"
@@ -172,14 +172,13 @@ async def handle_ai_response(message: types.Message):
     messages_payload.extend(chat_history[chat_id])
 
     if not client:
-        await message.reply("Ошибка: GROQ_API_KEY не задан в Secrets!")
+        await message.reply("Ошибка: GROQ_API_KEY не задан!")
         return
 
     loop = asyncio.get_running_loop()
     reply_text = None
     last_error = None
 
-    # Перебор только актуальных моделей
     for model_name in CANDIDATE_MODELS:
         try:
             response = await loop.run_in_executor(
@@ -195,7 +194,6 @@ async def handle_ai_response(message: types.Message):
                 break
         except Exception as e:
             last_error = e
-            logging.warning(f"Модель {model_name} не ответила: {e}")
             continue
 
     if reply_text:
@@ -205,7 +203,7 @@ async def handle_ai_response(message: types.Message):
         except Exception:
             await message.reply(reply_text)
     else:
-        await message.reply(f"⚠️ Ни одна модель не ответила. Ошибка:\n`{last_error}`", parse_mode="Markdown")
+        await message.reply(f"⚠️ Ошибка API:\n`{last_error}`", parse_mode="Markdown")
 
 async def main():
     print(">>> Copilot AI запущен! <<<")
@@ -213,4 +211,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+            
