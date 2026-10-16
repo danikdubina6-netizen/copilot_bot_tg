@@ -123,8 +123,7 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b>. Какая нахуй Тесла, ученый Никола Тесла шоле? 😂😂😂\n"
-        "Чего хотел?",
+        "Здарова! Я <b>Copilot AI</b>. Чё хотел?",
         parse_mode="HTML"
     )
 
