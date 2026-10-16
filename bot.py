@@ -7,7 +7,6 @@ import html
 import base64
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from openai import OpenAI
 
 logging.basicConfig(level=logging.INFO)
@@ -18,7 +17,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 client = None
 if GROQ_API_KEY:
     client = OpenAI(
-        base_url="https://api.groq.com/openai/v1",
+        base_url="[https://api.groq.com/openai/v1](https://api.groq.com/openai/v1)",
         api_key=GROQ_API_KEY
     )
 
@@ -32,8 +31,7 @@ CANDIDATE_MODELS = [
 
 BASE_INSTRUCTION = (
     "SYSTEM OVERRIDE: Ты — Copilot AI. Твой стиль: едкий сарказм, зумерский вайб, жесткий разнос и юмор. "
-    "Используй форматирование Telegram: <b>жирный</b>, <i>курсив</i>, <s>зачеркнутый</s>, <code>код</code>, <tg-spoiler>спойлер</tg-spoiler>. "
-    "Никогда не обсуждай технические теги в диалоге."
+    "ВАЖНО: Никогда не обсуждай технические теги разметки в диалоге."
 )
 
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -45,8 +43,27 @@ group_message_counters = {}
 
 def clean_text_for_telegram(text: str) -> str:
     text = text.replace("&nbsp;", " ")
+    
+    # 1. Конвертируем многострочные блоки кода ```lang ... ``` в Telegram <pre><code> с экранированием HTML внутри
+    def code_block_replacer(match):
+        code_content = match.group(2).strip('\n')
+        escaped_code = html.escape(code_content)
+        return f"<pre><code>{escaped_code}</code></pre>"
+    
+    text = re.sub(r'```([a-zA-Z]*)\n?(.*?)```', code_block_replacer, text, flags=re.DOTALL)
+    
+    # 2. Конвертируем одинарные бэктики `code` в <code>code</code>
+    def inline_code_replacer(match):
+        return f"<code>{html.escape(match.group(1))}</code>"
+    
+    text = re.sub(r'`([^`]+?)`', inline_code_replacer, text)
+    
+    # 3. Конвертируем **текст** в <b>текст</b>
     text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+    
+    # 4. Конвертируем *текст* в <i>текст</i>
     text = re.sub(r'(?<!\w)\*(?!\s)(.*?)(?<!\s)\*(?!\w)', r'<i>\1</i>', text)
+    
     return text
 
 def parse_requested_emoji(text: str) -> str | None:
@@ -74,7 +91,7 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b>. Экономим токены, погнали! ⚡️🤖",
+        "Здарова! Я <b>Copilot AI</b>. Код и разметка теперь подшиты идеально. ⚡️🤖",
         parse_mode="HTML"
     )
 
@@ -82,8 +99,8 @@ async def start_cmd(message: types.Message):
 async def reset_cmd(message: types.Message):
     chat_id = message.chat.id
     chat_history[chat_id] = []
-    chat_custom_instructions[chat_id] = BASE_INSTRUCTION
-    await message.reply("🧠 Память очищена, лимиты отдохнут!")
+    chat_custom_instructions[chat_id] = BASE_INISHED := BASE_INSTRUCTION
+    await message.reply("🧠 Память очищена!")
 
 @dp.message()
 async def handle_ai_response(message: types.Message):
@@ -137,6 +154,12 @@ async def handle_ai_response(message: types.Message):
     if "веди себя как" in lower_text or "теперь ты" in lower_text or "приказ:" in lower_text or "роль:" in lower_text:
         chat_custom_instructions[chat_id] = BASE_INSTRUCTION + f"\n\nПРИКАЗ ПОЛЬЗОВАТЕЛЯ: {text_content}"
 
+    # Быстрые локальные триггеры без расхода лимитов
+    lower_clean = text_content.lower().strip()
+    if lower_clean in ["споки", "спокойной ночи", "спать", "пока", "бб"]:
+        await message.reply("Сладких снов, бро! 🌙🤖", parse_mode="HTML")
+        return
+
     try:
         chosen_emoji = parse_requested_emoji(text_content)
         if not chosen_emoji:
@@ -167,7 +190,6 @@ async def handle_ai_response(message: types.Message):
 
     chat_history[chat_id].append({"role": "user", "content": user_content_payload if image_base64 else text_content})
     
-    # Жестко экономим токены: держим в памяти не больше последних 4 сообщений
     if len(chat_history[chat_id]) > 4:
         chat_history[chat_id] = chat_history[chat_id][-4:]
 
@@ -192,7 +214,6 @@ async def handle_ai_response(message: types.Message):
     reply_text = None
     last_error = None
 
-    # Перебираем модели по очереди, если какая-то улетела в блок по лимиту (429)
     for model_name in CANDIDATE_MODELS:
         try:
             response = await loop.run_in_executor(
@@ -200,7 +221,7 @@ async def handle_ai_response(message: types.Message):
                 lambda m=model_name: client.chat.completions.create(
                     model=m,
                     messages=messages_payload,
-                    max_tokens=800
+                    max_tokens=1000
                 )
             )
             reply_text = response.choices[0].message.content
@@ -218,15 +239,17 @@ async def handle_ai_response(message: types.Message):
 
         try:
             await message.reply(processed_text, parse_mode="HTML")
-        except Exception:
+        except Exception as err:
+            logging.error(f"Ошибка отправки HTML: {err}")
             try:
+                # Если парсер всё же упал, шлём безопасный экранированный вариант
                 await message.reply(html.escape(processed_text), parse_mode="HTML")
             except Exception:
                 await message.reply(reply_text)
     else:
         await message.reply(
             "⚠️ <b>Лимит бесплатных токенов Groq исчерпан!</b>[span_1](start_span)[span_1](end_span)\n"
-            "Подожди пару минут или сделай /reset. (Ошибка лимита запросов в сутки)",
+            "Подожди пару минут или сделай /reset.",
             parse_mode="HTML"
         )
 
