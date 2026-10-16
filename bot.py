@@ -5,6 +5,7 @@ import random
 import re
 import html
 import base64
+import urllib.parse
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
 from openai import OpenAI
@@ -44,7 +45,6 @@ group_message_counters = {}
 def clean_text_for_telegram(text: str) -> str:
     text = text.replace("&nbsp;", " ")
     
-    # 1. Конвертируем многострочные блоки кода ```lang ... ``` в Telegram <pre><code>
     def code_block_replacer(match):
         code_content = match.group(2).strip('\n')
         escaped_code = html.escape(code_content)
@@ -52,16 +52,12 @@ def clean_text_for_telegram(text: str) -> str:
     
     text = re.sub(r'```([a-zA-Z]*)\n?(.*?)```', code_block_replacer, text, flags=re.DOTALL)
     
-    # 2. Конвертируем одинарные бэктики `code` в <code>code</code>
     def inline_code_replacer(match):
         return f"<code>{html.escape(match.group(1))}</code>"
     
     text = re.sub(r'`([^`]+?)`', inline_code_replacer, text)
     
-    # 3. Конвертируем **текст** в <b>текст</b>
     text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
-    
-    # 4. Конвертируем *текст* в <i>текст</i>
     text = re.sub(r'(?<!\w)\*(?!\s)(.*?)(?<!\s)\*(?!\w)', r'<i>\1</i>', text)
     
     return text
@@ -91,7 +87,7 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b>. Всё исправлено, летим дальше! ⚡️🤖",
+        "Здарова! Я <b>Copilot AI</b>. Теперь умею и картинки генерировать по фразе! ⚡️🎨",
         parse_mode="HTML"
     )
 
@@ -148,13 +144,39 @@ async def handle_ai_response(message: types.Message):
         return
 
     lower_text = text_content.lower()
+
+    # --- УМНЫЙ ПЕРЕХВАТ ГЕНЕРАЦИИ КАРТИНОК ---
+    generation_triggers = ["сгенерируй", "нарисуй", "создай картинку", "сделай аву", "картинка с", "аватарка"]
+    if any(trigger in lower_text for trigger in generation_triggers):
+        # Вырезаем ключевые слова, чтобы оставить чистый промпт для генератора
+        clean_prompt = text_content
+        for trig in generation_triggers:
+            clean_prompt = clean_prompt.replace(trig, "").replace("картинку", "").replace("картинка", "").strip()
+        
+        if not clean_prompt:
+            clean_prompt = text_content
+
+        # Кодируем запрос для URL
+        encoded_prompt = urllib.parse.quote(clean_prompt)
+        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true"
+
+        await bot.send_chat_action(chat_id=chat_id, action="upload_photo")
+        try:
+            await message.reply_photo(
+                photo=image_url,
+                caption=f"🎨 Держи творение по запросу: <b>{html.escape(clean_prompt)}</b>",
+                parse_mode="HTML"
+            )
+            return
+        except Exception as e:
+            logging.error(f"Ошибка генерации картинки: {e}")
+
     if chat_id not in chat_custom_instructions:
         chat_custom_instructions[chat_id] = BASE_INSTRUCTION
 
     if "веди себя как" in lower_text or "теперь ты" in lower_text or "приказ:" in lower_text or "роль:" in lower_text:
         chat_custom_instructions[chat_id] = BASE_INSTRUCTION + f"\n\nПРИКАЗ ПОЛЬЗОВАТЕЛЯ: {text_content}"
 
-    # Быстрые локальные триггеры без расхода лимитов
     lower_clean = text_content.lower().strip()
     if lower_clean in ["споки", "спокойной ночи", "спать", "пока", "бб"]:
         await message.reply("Сладких снов, бро! 🌙🤖", parse_mode="HTML")
@@ -258,4 +280,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-            
+    
