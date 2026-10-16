@@ -87,10 +87,12 @@ async def translate_and_enhance_prompt(russian_prompt: str) -> str:
         return russian_prompt
 
     instruction = (
-        "TASK: Translate the user's image generation prompt from Russian to English. "
-        "Expand it slightly with technical details (style, lighting, etc.) suitable for an AI image generator. "
-        "Maintain the exact intent. If the original contains a proper name or specific brand, preserve it and clarify. "
-        "Reply ONLY with the English prompt text."
+        "You are an expert prompt engineer for AI image generators (like Stable Diffusion / Pollinations). "
+        "Extract the core subject from the user's input, translate it to English, and expand it with high-quality visual details "
+        "(realistic lighting, background, photographic style). "
+        "CRITICAL: If the user mentions a specific car brand or model (like Tesla, Zhiguli, Lada, BMW, etc.), ensure it is explicitly and prominently featured in the prompt. "
+        "Do NOT include conversational filler, service words like 'generate', 'draw', or service phrases. "
+        "Reply ONLY with the final English prompt text."
     )
 
     try:
@@ -102,7 +104,7 @@ async def translate_and_enhance_prompt(russian_prompt: str) -> str:
                     {"role": "system", "content": instruction},
                     {"role": "user", "content": russian_prompt}
                 ],
-                max_tokens=150
+                max_tokens=100
             )
         )
         enhanced_prompt = response.choices[0].message.content.strip()
@@ -120,7 +122,7 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b>. Всё на мази, анти-тян фильтр на машины активирован! ⚡️🤖",
+        "Здарова! Я <b>Copilot AI</b>. Промпт-инженер активирован, генерация машин и кода работает идеально! ⚡️🤖",
         parse_mode="HTML"
     )
 
@@ -178,12 +180,12 @@ async def handle_ai_response(message: types.Message):
 
     lower_text = text_content.lower()
 
-    # --- УМНЫЙ ПЕРЕХВАТ ГЕНЕРАЦИИ КАРТИНОК С ЖЕСТКИМ ФИЛЬТРОМ ---
-    generation_triggers = ["сгенерируй", "нарисуй", "создай картинку", "сделай аву", "картинка с", "аватарка"]
+    # --- УМНЫЙ ПЕРЕХВАТ ГЕНЕРАЦИИ КАРТИНОК ---
+    generation_triggers = ["сгенерируй", "нарисуй", "создай картинку", "сделай аву", "картинка с", "аватарка", "изображение"]
     if any(trigger in lower_text for trigger in generation_triggers):
         clean_prompt = text_content
         for trig in generation_triggers:
-            clean_prompt = clean_prompt.replace(trig, "").replace("картинку", "").replace("картинка", "").strip()
+            clean_prompt = clean_prompt.replace(trig, "").strip()
         
         if not clean_prompt:
             clean_prompt = text_content
@@ -193,19 +195,19 @@ async def handle_ai_response(message: types.Message):
         enhanced_english_prompt = await translate_and_enhance_prompt(clean_prompt)
         
         final_image_prompt = f"masterpiece, best quality, {enhanced_english_prompt}"
-        if any(w in clean_prompt.lower() for w in ["машин", "авто", "жигул", "ладу", "тачк", "bmw", "mercedes", "автомобиль"]):
-            final_image_prompt = f"photorealistic car exterior, street background, no people, exactly a car, {enhanced_english_prompt}"
+        if any(w in clean_prompt.lower() for w in ["машин", "авто", "жигул", "ладу", "тачк", "bmw", "mercedes", "тесл", "tesla", "автомобиль"]):
+            final_image_prompt = f"photorealistic exterior shot of {enhanced_english_prompt}, street background, no people, highly detailed"
 
         logging.info(f"Оригинал: {clean_prompt} -> Финальный промпт: {final_image_prompt}")
 
         encoded_prompt = urllib.parse.quote(final_image_prompt)
-        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true"
+        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true&seed={random.randint(1, 999999)}"
 
         await bot.send_chat_action(chat_id=chat_id, action="upload_photo")
         try:
             await message.reply_photo(
                 photo=image_url,
-                caption=f"🎨 Реально по запросу: <b>{html.escape(clean_prompt)}</b>",
+                caption=f"🎨 <b>{html.escape(clean_prompt)}</b>",
                 parse_mode="HTML"
             )
             return
