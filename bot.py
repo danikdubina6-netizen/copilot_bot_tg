@@ -181,7 +181,7 @@ async def handle_ai_response(message: types.Message):
 
     lower_text = text_content.lower()
 
-    # --- УМНЫЙ ПЕРЕХВАТ ГЕНЕРАЦИИ КАРТИНОК ---
+    # --- УМНЫЙ ПЕРЕХВАТ ГЕНЕРАЦИИ КАРТИНОК С УЧЕТОМ ЛЮДЕЙ ---
     generation_triggers = ["сгенерируй", "нарисуй", "создай картинку", "сделай аву", "картинка с", "аватарка", "изображение"]
     if any(trigger in lower_text for trigger in generation_triggers):
         clean_prompt = text_content
@@ -196,10 +196,16 @@ async def handle_ai_response(message: types.Message):
         enhanced_english_prompt = await translate_and_enhance_prompt(clean_prompt)
         
         lower_clean_original = clean_prompt.lower()
+        has_person = any(w in lower_clean_original for w in ["чел", "человек", "стоит", "парни", "девушк", "мужчин"])
+        
         if "тесл" in lower_clean_original or "tesla" in lower_clean_original:
-            final_image_prompt = "futuristic cyberpunk Tesla electric car driving on a glowing neon wet city street, highly detailed, photorealistic, 4k"
+            if has_person:
+                final_image_prompt = f"photorealistic cyberpunk scene of a person standing next to a Tesla electric car on a glowing neon wet city street, highly detailed, 4k"
+            else:
+                final_image_prompt = "futuristic cyberpunk Tesla electric car driving on a glowing neon wet city street, highly detailed, photorealistic, 4k"
         elif any(w in lower_clean_original for w in ["машин", "авто", "жигул", "ладу", "тачк", "bmw", "mercedes", "автомобиль"]):
-            final_image_prompt = f"photorealistic exterior shot of {enhanced_english_prompt}, cyberpunk street background, no people, highly detailed car"
+            person_modifier = "with a person standing nearby" if has_person else "no people"
+            final_image_prompt = f"photorealistic exterior shot of {enhanced_english_prompt}, cyberpunk street background, {person_modifier}, highly detailed car"
         else:
             final_image_prompt = f"masterpiece, best quality, {enhanced_english_prompt}"
 
@@ -328,4 +334,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+            
