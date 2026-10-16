@@ -17,7 +17,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 client = None
 if GROQ_API_KEY:
     client = OpenAI(
-        base_url="[https://api.groq.com/openai/v1](https://api.groq.com/openai/v1)",
+        base_url="https://api.groq.com/openai/v1",
         api_key=GROQ_API_KEY
     )
 
@@ -44,7 +44,7 @@ group_message_counters = {}
 def clean_text_for_telegram(text: str) -> str:
     text = text.replace("&nbsp;", " ")
     
-    # 1. Конвертируем многострочные блоки кода ```lang ... ``` в Telegram <pre><code> с экранированием HTML внутри
+    # 1. Конвертируем многострочные блоки кода ```lang ... ``` в Telegram <pre><code>
     def code_block_replacer(match):
         code_content = match.group(2).strip('\n')
         escaped_code = html.escape(code_content)
@@ -91,7 +91,7 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b>. Код и разметка теперь подшиты идеально. ⚡️🤖",
+        "Здарова! Я <b>Copilot AI</b>. Всё исправлено, летим дальше! ⚡️🤖",
         parse_mode="HTML"
     )
 
@@ -99,7 +99,7 @@ async def start_cmd(message: types.Message):
 async def reset_cmd(message: types.Message):
     chat_id = message.chat.id
     chat_history[chat_id] = []
-    chat_custom_instructions[chat_id] = BASE_INISHED := BASE_INSTRUCTION
+    chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     await message.reply("🧠 Память очищена!")
 
 @dp.message()
@@ -242,13 +242,12 @@ async def handle_ai_response(message: types.Message):
         except Exception as err:
             logging.error(f"Ошибка отправки HTML: {err}")
             try:
-                # Если парсер всё же упал, шлём безопасный экранированный вариант
                 await message.reply(html.escape(processed_text), parse_mode="HTML")
             except Exception:
                 await message.reply(reply_text)
     else:
         await message.reply(
-            "⚠️ <b>Лимит бесплатных токенов Groq исчерпан!</b>[span_1](start_span)[span_1](end_span)\n"
+            "⚠️ <b>Лимит бесплатных токенов Groq исчерпан!</b>\n"
             "Подожди пару минут или сделай /reset.",
             parse_mode="HTML"
         )
