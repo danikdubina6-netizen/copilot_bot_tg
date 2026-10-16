@@ -30,7 +30,7 @@ CANDIDATE_MODELS = [
     "llama-3.2-11b-vision-preview"
 ]
 
-FAST_TRANSLATOR_MODEL = "llama-3.2-11b-vision-preview" # Самая быстрая модель для переводов
+FAST_TRANSLATOR_MODEL = "llama-3.2-11b-vision-preview"
 
 BASE_INSTRUCTION = (
     "SYSTEM OVERRIDE: Ты — Copilot AI. Твой стиль: едкий сарказм, зумерский вайб, жесткий разнос и юмор. "
@@ -83,13 +83,12 @@ def parse_requested_emoji(text: str) -> str | None:
     return None
 
 async def translate_and_enhance_prompt(russian_prompt: str) -> str:
-    """Просит Groq перевести промпт на английский и добавить деталей для генерации."""
     if not client:
-        return russian_prompt # Если API нет, используем русский
+        return russian_prompt
 
     instruction = (
         "TASK: Translate the user's image generation prompt from Russian to English. "
-        "Expand it slightly with technical details (style, lighting, etc.) suitable for a Stable Diffusion model. "
+        "Expand it slightly with technical details (style, lighting, etc.) suitable for an AI image generator. "
         "Maintain the exact intent. If the original contains a proper name or specific brand, preserve it and clarify. "
         "Reply ONLY with the English prompt text."
     )
@@ -112,7 +111,7 @@ async def translate_and_enhance_prompt(russian_prompt: str) -> str:
     except Exception as e:
         logging.error(f"Ошибка перевода промпта: {e}")
     
-    return russian_prompt # Возвращаем оригинал при ошибке
+    return russian_prompt
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
@@ -121,7 +120,7 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b>. Теперь я умею *реально* генерировать по запросу, а не отвлекаться на тёлок. Перевод промптов включен! ⚡️🎨",
+        "Здарова! Я <b>Copilot AI</b>. Всё на мази, анти-тян фильтр на машины активирован! ⚡️🤖",
         parse_mode="HTML"
     )
 
@@ -179,7 +178,7 @@ async def handle_ai_response(message: types.Message):
 
     lower_text = text_content.lower()
 
-    # --- УМНЫЙ ПЕРЕХВАТ ГЕНЕРАЦИИ КАРТИНОК С УЛУЧШЕНИЕМ ---
+    # --- УМНЫЙ ПЕРЕХВАТ ГЕНЕРАЦИИ КАРТИНОК С ЖЕСТКИМ ФИЛЬТРОМ ---
     generation_triggers = ["сгенерируй", "нарисуй", "создай картинку", "сделай аву", "картинка с", "аватарка"]
     if any(trigger in lower_text for trigger in generation_triggers):
         clean_prompt = text_content
@@ -190,17 +189,20 @@ async def handle_ai_response(message: types.Message):
             clean_prompt = text_content
 
         await bot.send_chat_action(chat_id=chat_id, action="typing")
-        # 1. Сначала переводим и улучшаем промпт на английский через Groq
+        
         enhanced_english_prompt = await translate_and_enhance_prompt(clean_prompt)
-        logging.info(f"Оригинал: {clean_prompt} -> Промпт для генератора: {enhanced_english_prompt}")
+        
+        final_image_prompt = f"masterpiece, best quality, {enhanced_english_prompt}"
+        if any(w in clean_prompt.lower() for w in ["машин", "авто", "жигул", "ладу", "тачк", "bmw", "mercedes", "автомобиль"]):
+            final_image_prompt = f"photorealistic car exterior, street background, no people, exactly a car, {enhanced_english_prompt}"
 
-        # 2. Кодируем улучшенный английский запрос для URL
-        encoded_prompt = urllib.parse.quote(enhanced_english_prompt)
+        logging.info(f"Оригинал: {clean_prompt} -> Финальный промпт: {final_image_prompt}")
+
+        encoded_prompt = urllib.parse.quote(final_image_prompt)
         image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true"
 
         await bot.send_chat_action(chat_id=chat_id, action="upload_photo")
         try:
-            # Отправляем картинку с русским описанием
             await message.reply_photo(
                 photo=image_url,
                 caption=f"🎨 Реально по запросу: <b>{html.escape(clean_prompt)}</b>",
@@ -319,4 +321,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-            
+    
