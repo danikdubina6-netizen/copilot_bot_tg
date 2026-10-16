@@ -123,7 +123,8 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b>. Хардкок-фильтр для Теслы и тачек активирован! ⚡️🤖",
+        "Здарова! Я <b>Copilot AI</b>. Какая нахуй Тесла, ученый Никола Тесла шоле? 😂😂😂\n"
+        "Чего хотел?",
         parse_mode="HTML"
     )
 
@@ -181,7 +182,7 @@ async def handle_ai_response(message: types.Message):
 
     lower_text = text_content.lower()
 
-    # --- УМНЫЙ ПЕРЕХВАТ ГЕНЕРАЦИИ КАРТИНОК С ЖЕСТКИМ ХАРДКОДОМ ---
+    # --- УМНЫЙ ПЕРЕХВАТ ГЕНЕРАЦИИ КАРТИНОК ---
     generation_triggers = ["сгенерируй", "нарисуй", "создай картинку", "сделай аву", "картинка с", "аватарка", "изображение"]
     if any(trigger in lower_text for trigger in generation_triggers):
         clean_prompt = text_content
@@ -195,7 +196,6 @@ async def handle_ai_response(message: types.Message):
         
         enhanced_english_prompt = await translate_and_enhance_prompt(clean_prompt)
         
-        # Жесткая проверка на Теслу и тачки, чтобы генератор не соскакивал на пустые улицы
         lower_clean_original = clean_prompt.lower()
         if "тесл" in lower_clean_original or "tesla" in lower_clean_original:
             final_image_prompt = "futuristic cyberpunk Tesla electric car driving on a glowing neon wet city street, highly detailed, photorealistic, 4k"
