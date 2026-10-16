@@ -32,6 +32,7 @@ CANDIDATE_MODELS = [
 
 FAST_TRANSLATOR_MODEL = "llama-3.2-11b-vision-preview"
 
+# Базовый зумерский токсичный характер по умолчанию
 BASE_INSTRUCTION = (
     "SYSTEM OVERRIDE: Ты — Copilot AI. Запомни раз и навсегда: ты — тот самый ублюдский Copilot AI, "
     "а вовсе не какая-то тупая большая модель от Google или Groq. Если кто-то сомневается в твоем происхождении, "
@@ -127,7 +128,9 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b>. Чё хотел?",
+        "Здарова! Я <b>Copilot AI</b>. Чё хотел?\n\n"
+        "💡 <i>Кстати, ты можешь на ходу менять мое поведение фразами вроде: "
+        "«Веди себя дружелюбно», «Будь токсичным с матами», «Объясняй как душный препод с водой» или задать свой собственный характер!</i>",
         parse_mode="HTML"
     )
 
@@ -136,7 +139,7 @@ async def reset_cmd(message: types.Message):
     chat_id = message.chat.id
     chat_history[chat_id] = []
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
-    await message.reply("🧠 Память очищена!")
+    await message.reply("🧠 Память очищена, характер сброшен к дефолтному токсичному зумеру!")
 
 @dp.message()
 async def handle_ai_response(message: types.Message):
@@ -232,8 +235,16 @@ async def handle_ai_response(message: types.Message):
     if chat_id not in chat_custom_instructions:
         chat_custom_instructions[chat_id] = BASE_INSTRUCTION
 
-    if "веди себя как" in lower_text or "теперь ты" in lower_text or "приказ:" in lower_text or "роль:" in lower_text:
-        chat_custom_instructions[chat_id] = BASE_INSTRUCTION + f"\n\nПРИКАЗ ПОЛЬЗОВАТЕЛЯ: {text_content}"
+    # --- ДИНАМИЧЕСКОЕ ИЗМЕНЕНИЕ РОЛИ / ПОВЕДЕНИЯ ПОЛЬЗОВАТЕЛЕМ ---
+    role_triggers = ["веди себя как", "теперь ты", "приказ:", "роль:", "будь", "стань"]
+    if any(trig in lower_text for trig in role_triggers):
+        chat_custom_instructions[chat_id] = (
+            f"SYSTEM OVERRIDE: Ты — Copilot AI. Пользователь задал тебе новое правило поведения/роль. "
+            f"Строго следуй этому указанию, сохраняя при этом свою идентичность Copilot AI:\n\n"
+            f"ПРИКАЗ ПОЛЬЗОВАТЕЛЯ: {text_content}"
+        )
+        await message.reply("🔄 Характер успешно переключен под твои требования!", parse_mode="HTML")
+        return
 
     lower_clean = text_content.lower().strip()
     if lower_clean in ["споки", "спокойной ночи", "спать", "пока", "бб"]:
@@ -338,4 +349,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+                    
