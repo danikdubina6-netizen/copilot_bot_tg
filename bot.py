@@ -30,6 +30,8 @@ CANDIDATE_MODELS = [
     "llama-3.2-11b-vision-preview"
 ]
 
+FAST_TRANSLATOR_MODEL = "llama-3.2-11b-vision-preview" # Самая быстрая модель для переводов
+
 BASE_INSTRUCTION = (
     "SYSTEM OVERRIDE: Ты — Copilot AI. Твой стиль: едкий сарказм, зумерский вайб, жесткий разнос и юмор. "
     "ВАЖНО: Никогда не обсуждай технические теги разметки в диалоге."
@@ -80,6 +82,38 @@ def parse_requested_emoji(text: str) -> str | None:
 
     return None
 
+async def translate_and_enhance_prompt(russian_prompt: str) -> str:
+    """Просит Groq перевести промпт на английский и добавить деталей для генерации."""
+    if not client:
+        return russian_prompt # Если API нет, используем русский
+
+    instruction = (
+        "TASK: Translate the user's image generation prompt from Russian to English. "
+        "Expand it slightly with technical details (style, lighting, etc.) suitable for a Stable Diffusion model. "
+        "Maintain the exact intent. If the original contains a proper name or specific brand, preserve it and clarify. "
+        "Reply ONLY with the English prompt text."
+    )
+
+    try:
+        response = await asyncio.get_running_loop().run_in_executor(
+            None,
+            lambda: client.chat.completions.create(
+                model=FAST_TRANSLATOR_MODEL,
+                messages=[
+                    {"role": "system", "content": instruction},
+                    {"role": "user", "content": russian_prompt}
+                ],
+                max_tokens=150
+            )
+        )
+        enhanced_prompt = response.choices[0].message.content.strip()
+        if enhanced_prompt:
+            return enhanced_prompt
+    except Exception as e:
+        logging.error(f"Ошибка перевода промпта: {e}")
+    
+    return russian_prompt # Возвращаем оригинал при ошибке
+
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
     chat_id = message.chat.id
@@ -87,7 +121,7 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b>. Теперь умею и картинки генерировать по фразе! ⚡️🎨",
+        "Здарова! Я <b>Copilot AI</b>. Теперь я умею *реально* генерировать по запросу, а не отвлекаться на тёлок. Перевод промптов включен! ⚡️🎨",
         parse_mode="HTML"
     )
 
@@ -145,10 +179,9 @@ async def handle_ai_response(message: types.Message):
 
     lower_text = text_content.lower()
 
-    # --- УМНЫЙ ПЕРЕХВАТ ГЕНЕРАЦИИ КАРТИНОК ---
+    # --- УМНЫЙ ПЕРЕХВАТ ГЕНЕРАЦИИ КАРТИНОК С УЛУЧШЕНИЕМ ---
     generation_triggers = ["сгенерируй", "нарисуй", "создай картинку", "сделай аву", "картинка с", "аватарка"]
     if any(trigger in lower_text for trigger in generation_triggers):
-        # Вырезаем ключевые слова, чтобы оставить чистый промпт для генератора
         clean_prompt = text_content
         for trig in generation_triggers:
             clean_prompt = clean_prompt.replace(trig, "").replace("картинку", "").replace("картинка", "").strip()
@@ -156,15 +189,21 @@ async def handle_ai_response(message: types.Message):
         if not clean_prompt:
             clean_prompt = text_content
 
-        # Кодируем запрос для URL
-        encoded_prompt = urllib.parse.quote(clean_prompt)
+        await bot.send_chat_action(chat_id=chat_id, action="typing")
+        # 1. Сначала переводим и улучшаем промпт на английский через Groq
+        enhanced_english_prompt = await translate_and_enhance_prompt(clean_prompt)
+        logging.info(f"Оригинал: {clean_prompt} -> Промпт для генератора: {enhanced_english_prompt}")
+
+        # 2. Кодируем улучшенный английский запрос для URL
+        encoded_prompt = urllib.parse.quote(enhanced_english_prompt)
         image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true"
 
         await bot.send_chat_action(chat_id=chat_id, action="upload_photo")
         try:
+            # Отправляем картинку с русским описанием
             await message.reply_photo(
                 photo=image_url,
-                caption=f"🎨 Держи творение по запросу: <b>{html.escape(clean_prompt)}</b>",
+                caption=f"🎨 Реально по запросу: <b>{html.escape(clean_prompt)}</b>",
                 parse_mode="HTML"
             )
             return
@@ -280,4 +319,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+            
