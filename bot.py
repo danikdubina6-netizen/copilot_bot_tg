@@ -87,11 +87,12 @@ async def translate_and_enhance_prompt(russian_prompt: str) -> str:
         return russian_prompt
 
     instruction = (
-        "You are an expert prompt engineer for AI image generators (like Stable Diffusion / Pollinations). "
-        "Extract the core subject from the user's input, translate it to English, and expand it with high-quality visual details "
-        "(realistic lighting, background, photographic style). "
-        "CRITICAL: If the user mentions a specific car brand or model (like Tesla, Zhiguli, Lada, BMW, etc.), ensure it is explicitly and prominently featured in the prompt. "
-        "Do NOT include conversational filler, service words like 'generate', 'draw', or service phrases. "
+        "You are an expert prompt engineer for AI image generators. "
+        "Translate the user's image request into a detailed English prompt. "
+        "CRITICAL RULES:\n"
+        "1. If the user mentions a specific vehicle (Tesla, Zhiguli, BMW, etc.), you MUST include it prominently.\n"
+        "2. If the user specifies a style (cyberpunk, retro, neon), include it.\n"
+        "3. NEVER return an empty scene or remove the main object. Always make the vehicle the central focus.\n"
         "Reply ONLY with the final English prompt text."
     )
 
@@ -108,7 +109,7 @@ async def translate_and_enhance_prompt(russian_prompt: str) -> str:
             )
         )
         enhanced_prompt = response.choices[0].message.content.strip()
-        if enhanced_prompt:
+        if enhanced_prompt and len(enhanced_prompt) > 3:
             return enhanced_prompt
     except Exception as e:
         logging.error(f"Ошибка перевода промпта: {e}")
@@ -122,7 +123,7 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b>. Промпт-инженер активирован, генерация машин и кода работает идеально! ⚡️🤖",
+        "Здарова! Я <b>Copilot AI</b>. Промпт-инженер прокачан, пустые улицы больше не пройдут! ⚡️🤖",
         parse_mode="HTML"
     )
 
@@ -323,4 +324,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+        
