@@ -123,7 +123,7 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b>. Промпт-инженер прокачан, пустые улицы больше не пройдут! ⚡️🤖",
+        "Здарова! Я <b>Copilot AI</b>. Хардкок-фильтр для Теслы и тачек активирован! ⚡️🤖",
         parse_mode="HTML"
     )
 
@@ -181,7 +181,7 @@ async def handle_ai_response(message: types.Message):
 
     lower_text = text_content.lower()
 
-    # --- УМНЫЙ ПЕРЕХВАТ ГЕНЕРАЦИИ КАРТИНОК ---
+    # --- УМНЫЙ ПЕРЕХВАТ ГЕНЕРАЦИИ КАРТИНОК С ЖЕСТКИМ ХАРДКОДОМ ---
     generation_triggers = ["сгенерируй", "нарисуй", "создай картинку", "сделай аву", "картинка с", "аватарка", "изображение"]
     if any(trigger in lower_text for trigger in generation_triggers):
         clean_prompt = text_content
@@ -195,9 +195,14 @@ async def handle_ai_response(message: types.Message):
         
         enhanced_english_prompt = await translate_and_enhance_prompt(clean_prompt)
         
-        final_image_prompt = f"masterpiece, best quality, {enhanced_english_prompt}"
-        if any(w in clean_prompt.lower() for w in ["машин", "авто", "жигул", "ладу", "тачк", "bmw", "mercedes", "тесл", "tesla", "автомобиль"]):
-            final_image_prompt = f"photorealistic exterior shot of {enhanced_english_prompt}, street background, no people, highly detailed"
+        # Жесткая проверка на Теслу и тачки, чтобы генератор не соскакивал на пустые улицы
+        lower_clean_original = clean_prompt.lower()
+        if "тесл" in lower_clean_original or "tesla" in lower_clean_original:
+            final_image_prompt = "futuristic cyberpunk Tesla electric car driving on a glowing neon wet city street, highly detailed, photorealistic, 4k"
+        elif any(w in lower_clean_original for w in ["машин", "авто", "жигул", "ладу", "тачк", "bmw", "mercedes", "автомобиль"]):
+            final_image_prompt = f"photorealistic exterior shot of {enhanced_english_prompt}, cyberpunk street background, no people, highly detailed car"
+        else:
+            final_image_prompt = f"masterpiece, best quality, {enhanced_english_prompt}"
 
         logging.info(f"Оригинал: {clean_prompt} -> Финальный промпт: {final_image_prompt}")
 
@@ -324,4 +329,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-        
+    
