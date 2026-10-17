@@ -26,9 +26,10 @@ if GROQ_API_KEY:
 
 BOT_USERNAME = "Copilot_AI2026_bot"
 
+# Основная + Резервная (Llama 3.1 8B Instant)
 TEXT_MODELS = [
     "llama-3.3-70b-versatile",
-    "qwen/qwen3.8-27b"
+    "llama-3.1-8b-instant"
 ]
 
 BASE_INSTRUCTION = (
@@ -87,7 +88,7 @@ def parse_requested_emoji(text: str) -> str | None:
 async def start_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.answer("Здарова! Я <b>Copilot AI</b>. Скучать точно не дам, разрываем этот чат без душноты. Чё как?", parse_mode="HTML")
+    await message.answer("Привет! Я Copilot AI — созданный в Украине ИИ-ассистент, готовый помочь тебе с кодингом, поиском информации, идеями и решением любых задач! 🚀\n\nЗадавай любой вопрос или отправляй голосовое!")
 
 @dp.message(Command("reset"))
 async def reset_cmd(message: types.Message):
@@ -183,7 +184,6 @@ async def handle_ai_response(message: types.Message):
             
         if not should_answer:
             group_message_counters[chat_id] = group_message_counters.get(chat_id, 0) + 1
-            # Четко триггер на ровно 15 сообщений
             if group_message_counters[chat_id] >= 15:
                 group_message_counters[chat_id] = 0
                 should_answer = True
@@ -350,6 +350,7 @@ async def handle_ai_response(message: types.Message):
 
     await bot.send_chat_action(chat_id=chat_id, action="typing")
     chat_history[chat_id].append({"role": "user", "content": text_content})
+    
     if len(chat_history[chat_id]) > 6:
         chat_history[chat_id] = chat_history[chat_id][-6:]
 
@@ -363,7 +364,7 @@ async def handle_ai_response(message: types.Message):
             if reply_text:
                 break
         except Exception as e:
-            logging.warning(f"Модель {model_name} ошибка: {e}")
+            logging.warning(f"Модель {model_name} ошибка или лимит: {e}")
             continue
 
     if reply_text:
