@@ -131,7 +131,6 @@ async def handle_ai_response(message: types.Message):
             voice_file = await bot.get_file(message.voice.file_id)
             voice_bytes = await bot.download_file(voice_file.file_path)
             
-            # Сохраняем во временный файл в памяти для отправки в Groq Audio API
             voice_io = BytesIO(voice_bytes.read())
             voice_io.name = "voice.oga"
 
@@ -144,7 +143,7 @@ async def handle_ai_response(message: types.Message):
                 )
             )
             text_content = transcript_response if isinstance(transcript_response, str) else transcript_response.text
-            logging.info(Распознано голосовое: {text_content})
+            logging.info(f"Распознано голосовое: {text_content}")
         except Exception as e:
             logging.error(f"Ошибка распознавания голосового: {e}")
             text_content = "Бро, я послушал твою голосовуху, но звук словил какой-то сбой. Повтори текстом."
@@ -319,7 +318,6 @@ async def handle_ai_response(message: types.Message):
         if is_voice_requested:
             await bot.send_chat_action(chat_id=chat_id, action="record_voice")
             try:
-                # Очищаем текст от HTML тегов для озвучки
                 clean_for_speech = re.sub(r'<[^>]+>', '', processed_text)
                 tts = gTTS(text=clean_for_speech, lang='ru', slow=False)
                 voice_io = BytesIO()
@@ -350,9 +348,9 @@ async def handle_ai_response(message: types.Message):
         )
 
 async def main():
-    print(">>> Copilot AI (с голосовым движком Whisper и озвучкой) запущен! <<<")
+    print(">>> Copilot AI запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-        
+            
