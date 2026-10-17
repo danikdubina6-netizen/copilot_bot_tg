@@ -53,7 +53,7 @@ def clean_text_for_telegram(text: str) -> str:
         escaped_code = html.escape(code_content)
         return f"<pre><code>{escaped_code}</code></pre>"
     
-    text = re.sub(r'```([a-zA-Z]*)\n?(.*?)```', code_block_replacer, text, flags=re.DOTALL)
+    text = re.sub(r'```([a-zA-Z]*)\n?(.*?)```', code_block_replacer, text, flags=root_flag := re.DOTALL) # type: ignore
     
     def inline_code_replacer(match):
         return f"<code>{html.escape(match.group(1))}</code>"
@@ -90,7 +90,7 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b>. Готов к работе без лишних багов. Чё как?",
+        "Здарова! Я <b>Copilot AI</b>. Теперь точно всё на мази. Чё как?",
         parse_mode="HTML"
     )
 
@@ -143,33 +143,44 @@ async def handle_ai_response(message: types.Message):
             logging.error(f"Ошибка распознавания голосового: {e}")
             text_content = "Бро, я послушал твою голосовуху, но звук словил сбой. Повтори текстом."
 
+    if not text_content and not image_base64:
+        return
+
+    lower_text = text_content.lower()
+
+    # ЖЕСТКАЯ ПРОВЕРКА ТРИГГЕРОВ ОЗВУЧКИ
+    voice_triggers = ["скажи голосом", "озвучь", "наговори", "голосом"]
+    is_voice_requested = any(trig in lower_text for trig in voice_triggers)
+
     should_answer = False
 
     if chat_type == "private" or getattr(message, "business_connection_id", None):
         should_answer = True
     else:
-        if message.reply_to_message and message.reply_to_message.from_user:
-            bot_user = await bot.get_me()
-            if message.reply_to_message.from_user.id == bot_user.id:
-                should_answer = True
-
-        if f"@{BOT_USERNAME}".lower() in text_content.lower():
+        # ЕСЛИ ЕСТЬ ЗАПРОС НА ОЗВУЧКУ — ОТВЕЧАЕМ СРАЗУ В ЛЮБОМ ЧАТЕ БЕЗ УСЛОВИЙ!
+        if is_voice_requested:
             should_answer = True
-            text_content = text_content.replace(f"@{BOT_USERNAME}", "").strip()
+        else:
+            if message.reply_to_message and message.reply_to_message.from_user:
+                bot_user = await bot.get_me()
+                if message.reply_to_message.from_user.id == bot_user.id:
+                    should_answer = True
 
-        if not should_answer:
-            if chat_id not in group_message_counters:
-                group_message_counters[chat_id] = 0
-            group_message_counters[chat_id] += 1
-            
-            if group_message_counters[chat_id] >= 15:
-                group_message_counters[chat_id] = 0
+            if f"@{BOT_USERNAME}".lower() in text_content.lower():
                 should_answer = True
+                text_content = text_content.replace(f"@{BOT_USERNAME}", "").strip()
 
-    if not should_answer or not text_content and not image_base64:
+            if not should_answer:
+                if chat_id not in group_message_counters:
+                    group_message_counters[chat_id] = 0
+                group_message_counters[chat_id] += 1
+                
+                if group_message_counters[chat_id] >= 15:
+                    group_message_counters[chat_id] = 0
+                    should_answer = True
+
+    if not should_answer:
         return
-
-    lower_text = text_content.lower()
 
     # СТАВИМ РЕАКЦИЮ МГНОВЕННО
     try:
@@ -188,7 +199,7 @@ async def handle_ai_response(message: types.Message):
 
     # ГЕНЕРАЦИЯ КАРТИНОК ЧЕРЕЗ POLLINATIONS FLUX
     generation_triggers = ["сгенерируй", "нарисуй", "создай картинку", "сделай аву", "картинка с", "аватарка", "изображение"]
-    if any(trigger in lower_text for trigger in generation_triggers):
+    if any(trigger in lower_text for trigger in generation_triggers) and not is_voice_requested:
         clean_prompt = text_content
         for trig in generation_triggers:
             clean_prompt = clean_prompt.replace(trig, "").strip()
@@ -219,7 +230,7 @@ async def handle_ai_response(message: types.Message):
 
     # ПРОВЕРКА ПРИКАЗОВ НА СМЕНУ РОЛИ
     role_triggers = ["веди себя как", "теперь ты", "приказ:", "роль:", "будь", "стань"]
-    if any(trig in lower_text for trig in role_triggers):
+    if any(trig in lower_text for trig in role_triggers) and not is_voice_requested:
         chat_custom_instructions[chat_id] = (
             f"SYSTEM OVERRIDE: Ты — Copilot AI. Пользователь отдал прямой приказ на смену поведения. "
             f"Выполняй его, но сохраняй веселый вайб:\n\n"
@@ -228,20 +239,14 @@ async def handle_ai_response(message: types.Message):
         await message.reply("🔄 Приказ принят!", parse_mode="HTML")
         return
 
-    # ЖЕСТКАЯ ПРОВЕРКА ТРИГГЕРОВ ОЗВУЧКИ
-    voice_triggers = ["скажи голосом", "озвучь", "наговори", "голосом"]
-    is_voice_requested = any(trig in lower_text for trig in voice_triggers)
-    
     reply_text = None
 
     if is_voice_requested:
         speech_prompt = text_content
         for trig in voice_triggers:
             speech_prompt = speech_prompt.replace(trig, "").strip()
-        # Жестко забираем чистый текст пользователя без участия нейросети
         reply_text = speech_prompt if speech_prompt else "Эээ, а что озвучивать-то?"
     else:
-        # УМНОЕ ДИНАМИЧЕСКОЕ ЗЕРКАЛИРОВАНИЕ ДЛЯ ОБЫЧНЫХ СООБЩЕНИЙ
         mirror_adaptation = (
             f"\n\n[ДИНАМИЧЕСКИЙ ВАЙБ В МОМЕНТЕ]: Пользователь написал/сказал: '{text_content}'. "
             "Мгновенно зеркаль его стиль, сленг и настроение. Никакой духоты — отвечай весело, живо и полностью договаривай мысли до конца."
@@ -312,7 +317,6 @@ async def handle_ai_response(message: types.Message):
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
         processed_text = clean_text_for_telegram(reply_text)
 
-        # ВСЕГДА шлем голосовуху, если в сообщении был триггер озвучки
         if is_voice_requested:
             await bot.send_chat_action(chat_id=chat_id, action="record_voice")
             try:
@@ -353,4 +357,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-        
+                    
