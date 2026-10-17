@@ -53,7 +53,7 @@ def clean_text_for_telegram(text: str) -> str:
         escaped_code = html.escape(code_content)
         return f"<pre><code>{escaped_code}</code></pre>"
     
-    text = re.sub(r'```([a-zA-Z]*)\n?(.*?)```', code_block_replacer, text, flags=root_flag := re.DOTALL) # type: ignore
+    text = re.sub(r'```([a-zA-Z]*)\n?(.*?)```', code_block_replacer, text, flags=re.DOTALL)
     
     def inline_code_replacer(match):
         return f"<code>{html.escape(match.group(1))}</code>"
@@ -90,7 +90,7 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b>. Теперь точно всё на мази. Чё как?",
+        "Здарова! Я <b>Copilot AI</b>. Всё, синтаксис чистый, летим дальше. Чё как?",
         parse_mode="HTML"
     )
 
@@ -148,7 +148,6 @@ async def handle_ai_response(message: types.Message):
 
     lower_text = text_content.lower()
 
-    # ЖЕСТКАЯ ПРОВЕРКА ТРИГГЕРОВ ОЗВУЧКИ
     voice_triggers = ["скажи голосом", "озвучь", "наговори", "голосом"]
     is_voice_requested = any(trig in lower_text for trig in voice_triggers)
 
@@ -157,7 +156,6 @@ async def handle_ai_response(message: types.Message):
     if chat_type == "private" or getattr(message, "business_connection_id", None):
         should_answer = True
     else:
-        # ЕСЛИ ЕСТЬ ЗАПРОС НА ОЗВУЧКУ — ОТВЕЧАЕМ СРАЗУ В ЛЮБОМ ЧАТЕ БЕЗ УСЛОВИЙ!
         if is_voice_requested:
             should_answer = True
         else:
@@ -182,7 +180,6 @@ async def handle_ai_response(message: types.Message):
     if not should_answer:
         return
 
-    # СТАВИМ РЕАКЦИЮ МГНОВЕННО
     try:
         chosen_emoji = parse_requested_emoji(text_content)
         if not chosen_emoji:
@@ -197,7 +194,6 @@ async def handle_ai_response(message: types.Message):
     except Exception as e:
         logging.error(f"Ошибка реакций: {e}")
 
-    # ГЕНЕРАЦИЯ КАРТИНОК ЧЕРЕЗ POLLINATIONS FLUX
     generation_triggers = ["сгенерируй", "нарисуй", "создай картинку", "сделай аву", "картинка с", "аватарка", "изображение"]
     if any(trigger in lower_text for trigger in generation_triggers) and not is_voice_requested:
         clean_prompt = text_content
@@ -228,7 +224,6 @@ async def handle_ai_response(message: types.Message):
     if chat_id not in chat_custom_instructions:
         chat_custom_instructions[chat_id] = BASE_INSTRUCTION
 
-    # ПРОВЕРКА ПРИКАЗОВ НА СМЕНУ РОЛИ
     role_triggers = ["веди себя как", "теперь ты", "приказ:", "роль:", "будь", "стань"]
     if any(trig in lower_text for trig in role_triggers) and not is_voice_requested:
         chat_custom_instructions[chat_id] = (
@@ -357,4 +352,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-                    
+    
