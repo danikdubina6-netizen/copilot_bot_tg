@@ -255,13 +255,16 @@ async def handle_ai_response(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
-    # ОБРАБОТКА И ОПИСАНИЕ ФОТО (С НАДЕЖНЫМ ФОЛЛБЭКОМ)
+    # НАДЕЖНАЯ ОБРАБОТКА И ОПИСАНИЕ ФОТО ЧЕРЕЗ BASE64
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         try:
             photo = message.photo[-1]
             photo_file = await bot.get_file(photo.file_id)
-            file_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{photo_file.file_path}"
+            photo_bytes_io = await bot.download_file(photo_file.file_path)
+            
+            raw_bytes = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
+            base64_image = base64.b64encode(raw_bytes).decode("utf-8")
 
             prompt_text = text_content if text_content else "Зацени эту фотку! Прокомментируй её дерзко, с юмором и рофлом, без душноты!"
 
@@ -271,7 +274,12 @@ async def handle_ai_response(message: types.Message):
                     "role": "user",
                     "content": [
                         {"type": "text", "text": prompt_text},
-                        {"type": "image_url", "image_url": {"url": file_url}}
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            }
+                        }
                     ]
                 }
             ]
@@ -292,7 +300,7 @@ async def handle_ai_response(message: types.Message):
             logging.error(f"Ошибка Vision API: {e}")
             fallback_payload = [
                 {"role": "system", "content": chat_custom_instructions[chat_id]},
-                {"role": "user", "content": "Брат, я скинул тебе крутую фотку, оцени её по полной программе с юмором!"}
+                {"role": "user", "content": "Брат, я скинул крутую фотку, оцени её по полной программе с юмором!"}
             ]
             response = groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
@@ -343,3 +351,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
