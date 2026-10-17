@@ -375,7 +375,13 @@ async def handle_ai_response(message: types.Message):
         except Exception:
             await message.reply(html.escape(processed_text), parse_mode="HTML")
     else:
-        await message.reply("⚠️ <b>Лимит токенов Copilot AI!</b> Сделай /reset.", parse_mode="HTML")
+        # Мягкий фоллбэк без требования /reset
+        fallback_jokes = [
+            "Бро, Groq сегодня жадничает на токены, давай секунду передохнем! 🤖",
+            "Лимиты поджимают, но мы на связи! Напиши еще раз чуть позже. 🔥",
+            "Мозг временно вскипел от потока гениальности. Перезапускаю мыслительные процессы! ⚡️"
+        ]
+        await message.reply(random.choice(fallback_jokes), parse_mode="HTML")
 
 async def main():
     print(">>> Copilot AI запущен! <<<")
