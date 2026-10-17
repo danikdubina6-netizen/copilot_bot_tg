@@ -85,7 +85,7 @@ def parse_requested_emoji(text: str) -> str | None:
 async def start_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.answer("Здарова! Я <b>Copilot AI</b>. Всё на мази, газуем!", parse_mode="HTML")
+    await message.answer("Здарова! Я <b>Copilot AI</b>. Распознавание строго на русском настроено, погнали!", parse_mode="HTML")
 
 @dp.message(Command("reset"))
 async def reset_cmd(message: types.Message):
@@ -128,7 +128,8 @@ async def handle_ai_response(message: types.Message):
                     lambda: groq_client.audio.transcriptions.create(
                         model="whisper-large-v3",
                         file=audio_file,
-                        response_format="text"
+                        response_format="text",
+                        language="ru"
                     )
                 )
             
@@ -259,3 +260,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
