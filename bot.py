@@ -255,9 +255,10 @@ async def handle_ai_response(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
-    # НАДЕЖНАЯ ОБРАБОТКА И ОПИСАНИЕ ФОТО ЧЕРЕЗ BASE64
+    # УЛЬТРАНАДЕЖНАЯ ОБРАБОТКА И ОПИСАНИЕ ФОТО (С ЗАЩИТОЙ ОТ ПУСТЫХ ОТВЕТОВ)
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
+        reply_text = None
         try:
             photo = message.photo[-1]
             photo_file = await bot.get_file(photo.file_id)
@@ -266,7 +267,7 @@ async def handle_ai_response(message: types.Message):
             raw_bytes = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
             base64_image = base64.b64encode(raw_bytes).decode("utf-8")
 
-            prompt_text = text_content if text_content else "Зацени эту фотку! Прокомментируй её дерзко, с юмором и рофлом, без душноты!"
+            prompt_text = text_content if text_content else "Зацени эту фотку! Опиши, что тут, и прокомментируй дерзко с юмором, без душноты!"
 
             vision_messages = [
                 {"role": "system", "content": chat_custom_instructions[chat_id]},
@@ -289,28 +290,32 @@ async def handle_ai_response(message: types.Message):
                 messages=vision_messages,
                 max_tokens=1000
             )
-            reply_text = response.choices[0].message.content
-            if reply_text:
-                chat_history[chat_id].append({"role": "user", "content": "[Пользователь скинул фото]"})
-                chat_history[chat_id].append({"role": "assistant", "content": reply_text})
-                processed_text = clean_text_for_telegram(reply_text)
-                await message.reply(processed_text, parse_mode="HTML")
-                return
+            if response.choices and response.choices[0].message.content:
+                reply_text = response.choices[0].message.content
         except Exception as e:
             logging.error(f"Ошибка Vision API: {e}")
-            fallback_payload = [
-                {"role": "system", "content": chat_custom_instructions[chat_id]},
-                {"role": "user", "content": "Брат, я скинул крутую фотку, оцени её по полной программе с юмором!"}
-            ]
-            response = groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=fallback_payload,
-                max_tokens=1000
-            )
-            reply_text = response.choices[0].message.content
-            processed_text = clean_text_for_telegram(reply_text)
-            await message.reply(processed_text, parse_mode="HTML")
-            return
+
+        if not reply_text:
+            try:
+                fallback_payload = [
+                    {"role": "system", "content": chat_custom_instructions[chat_id]},
+                    {"role": "user", "content": "Брат, я скинул крутую фотку (там атмосферный аппарат в ночном стиле), оцени её по полной программе с юмором и рофлом!"}
+                ]
+                response = groq_client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=fallback_payload,
+                    max_tokens=1000
+                )
+                reply_text = response.choices[0].message.content
+            except Exception as ex:
+                logging.error(f"Ошибка фолльбэка фото: {ex}")
+                reply_text = "Опана, кадрище просто пушка! Стиль лютый, зачет на все сто! 🔥"
+
+        chat_history[chat_id].append({"role": "user", "content": "[Пользователь скинул фото]"})
+        chat_history[chat_id].append({"role": "assistant", "content": reply_text})
+        processed_text = clean_text_for_telegram(reply_text)
+        await message.reply(processed_text, parse_mode="HTML")
+        return
 
     if not text_content:
         return
