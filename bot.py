@@ -47,7 +47,10 @@ group_message_counters = {}
 def clean_text_for_telegram(text: str) -> str:
     text = text.replace("&nbsp;", " ")
     def code_block_replacer(match):
-        return f"<pre><code>{html.escape(match.group(2).strip('\n'))}</code></pre>"
+        stripped_content = match.group(2).strip('\n')
+        escaped_content = html.escape(stripped_content)
+        return f"<pre><code>{escaped_content}</code></pre>"
+        
     text = re.sub(r'```([a-zA-Z]*)\n?(.*?)```', code_block_replacer, text, flags=re.DOTALL)
     text = re.sub(r'`([^`]+?)`', lambda m: f"<code>{html.escape(m.group(1))}</code>", text)
     text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
@@ -72,7 +75,7 @@ def parse_requested_emoji(text: str) -> str | None:
 async def start_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.answer("Здарова! Я <b>Copilot AI</b>. Озвучка теперь со 100% гарантией вылетает. Чё как?", parse_mode="HTML")
+    await message.answer("Здарова! Я <b>Copilot AI</b>. Ошибку фиксанули, летим дальше. Чё как?", parse_mode="HTML")
 
 @dp.message(Command("reset"))
 async def reset_cmd(message: types.Message):
@@ -125,7 +128,6 @@ async def handle_ai_response(message: types.Message):
 
     lower_text = text_content.lower()
 
-    # Сверхнадежная проверка триггера озвучки
     is_voice_requested = lower_text.startswith("озв") or lower_text.startswith("скаж") or "озвучь" in lower_text or "скажи голосом" in lower_text
 
     should_answer = False
@@ -147,14 +149,12 @@ async def handle_ai_response(message: types.Message):
     if not should_answer:
         return
 
-    # Ставим реакцию
     try:
         chosen_emoji = parse_requested_emoji(text_content) or ("🔥" if (message.photo or message.voice) else random.choice(["👍", "🔥", "⚡️", "❤️", "🗿", "😂"]))
         await bot.set_message_reaction(chat_id=chat_id, message_id=message.message_id, reaction=[types.ReactionTypeEmoji(emoji=chosen_emoji)])
     except Exception as e:
         logging.error(f"Ошибка реакций: {e}")
 
-    # --- ЕСЛИ ПРОСЯТ ОЗВУЧИТЬ — ГЕНЕРИРУЕМ ГОЛОС ЧЕРЕЗ ВРЕМЕННЫЙ ФАЙЛ ---
     if is_voice_requested:
         words = text_content.split()
         speech_prompt = " ".join(words[1:]) if len(words) > 1 else text_content
@@ -164,7 +164,6 @@ async def handle_ai_response(message: types.Message):
         try:
             clean_for_speech = speech_prompt.replace('"', '').replace("'", "").replace('«', '').replace('»', '').replace('*', '')
             
-            # Генерируем аудио во временный файл
             tts = gTTS(text=clean_for_speech, lang='ru', slow=False)
             audio_path = "voice_temp.ogg"
             tts.save(audio_path)
@@ -176,7 +175,6 @@ async def handle_ai_response(message: types.Message):
                 parse_mode="HTML"
             )
             
-            # Удаляем временный файл после отправки
             if os.path.exists(audio_path):
                 os.remove(audio_path)
             return
@@ -185,7 +183,6 @@ async def handle_ai_response(message: types.Message):
             await message.reply(f"⚠️ Ошибка озвучки: {e}")
             return
 
-    # --- ОБЫЧНАЯ ЛОГИКА ДЛЯ КАРТИНОК И ТЕКСТА ---
     generation_triggers = ["сгенерируй", "нарисуй", "создай картинку", "сделай аву", "картинка с", "аватарка", "изображение"]
     if any(trigger in lower_text for trigger in generation_triggers):
         clean_prompt = text_content
@@ -244,4 +241,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-            
+    
