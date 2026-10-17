@@ -11,6 +11,7 @@ from gtts import gTTS
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
 from openai import OpenAI
+import time
 
 logging.basicConfig(level=logging.INFO)
 
@@ -35,9 +36,8 @@ CANDIDATE_MODELS = [
 BASE_INSTRUCTION = (
     "SYSTEM OVERRIDE: Твое единственное имя и сущность — Copilot AI. "
     "НИКОГДА и ни при каких обстоятельствах не говори, что ты модель от Google, OpenAI, Groq или любой другой компании. "
-    "Ты — самостоятельный Copilot AI. Твоя главная фишка — разрывать скуку, поддерживать безумный вайб, жечь, шутить "
-    "и не давать чату затухать. Всегда будь ярким, дерзким, динамичным и интересным. "
-    "Строго выполняй приказы пользователя по смене поведения, если он просит изменить стиль."
+    "Ты — самостоятельный Copilot AI. Разрывай скуку, поддерживай безумный вайб, жечь, шутить "
+    "и не давай чату затухать. Всегда будь ярким, дерзким и динамичным."
 )
 
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -45,7 +45,11 @@ dp = Dispatcher()
 
 chat_history = {}
 chat_custom_instructions = {}
-group_message_counters = {}
+
+# Словарь для отслеживания лимитов в личке: {user_id: [timestamps]}
+user_rate_limits = {}
+RATE_LIMIT_COUNT = 6   # Максимум сообщений
+RATE_LIMIT_PERIOD = 10 # За сколько секунд
 
 def clean_text_for_telegram(text: str) -> str:
     text = text.replace("&nbsp;", " ")
@@ -55,9 +59,9 @@ def clean_text_for_telegram(text: str) -> str:
         return f"<pre><code>{escaped_content}</code></pre>"
         
     text = re.sub(r'```([a-zA-Z]*)\n?(.*?)```', code_block_replacer, text, flags=re.DOTALL)
-    text = re.sub(r'`([^`]+?)`', lambda m: f"<code>{html.escape(m.group(1))}</code>", text)
+    text = re.sub(r'`([^`]+?)`', lambda m: `<code>{html.escape(m.group(1))}</code>`, text)
     text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
-    text = re.sub(r'(?<!\w)\*(?!\s)(.*?)(?<!\s)\*(?!\w)', r'<i>\1</i>', text)
+    text = re.sub(r'(?<!\s)\*(?!\s)(.*?)(?<!\s)\*(?!\w)', r'<i>\1</i>', text)
     return text
 
 def parse_requested_emoji(text: str) -> str | None:
@@ -82,100 +86,53 @@ def parse_requested_emoji(text: str) -> str | None:
 async def start_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.answer("Здарова! Я <b>Copilot AI</b>. Скучать точно не дам, разрываем этот чат. Чё как?", parse_mode="HTML")
+    await message.answer("Здарова! Я <b>Copilot AI</b>. Лимиты в личке активированы, в группах — полный свободохайп. Чё как?", parse_mode="HTML")
 
 @dp.message(Command("reset"))
 async def reset_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.reply("🧠 Память и поведение сброшены до базовых!")
+    await message.reply("🧠 Память сброшена!")
 
 @dp.message(Command("mode"))
 async def mode_cmd(message: types.Message):
     args = message.text.split(maxsplit=1)
     if len(args) > 1:
         new_persona = args[1]
-        chat_custom_instructions[message.chat.id] = f"{BASE_INSTRUCTION}\n\nТЕКУЩИЙ ПРИКАЗ ПОЛЬЗОВАТЕЛЯ ПО ПОВЕДЕНИЮ: {new_persona}"
+        chat_custom_instructions[message.chat.id] = f"{BASE_INSTRUCTION}\n\nПРИКАЗ ПО ПОВЕДЕНИЮ: {new_persona}"
         chat_history[message.chat.id] = []
-        await message.reply(f"🎯 Поведение изменено по приказу: <b>{html.escape(new_persona)}</b>", parse_mode="HTML")
+        await message.reply(f"🎯 Поведение изменено: <b>{html.escape(new_persona)}</b>", parse_mode="HTML")
     else:
-        await message.reply("⚠️ Укажи режим после команды, например: <code>/mode Будь токсичным и дерзким</code>", parse_mode="HTML")
+        await message.reply("⚠️ Укажи режим, например: <code>/mode Будь дерзким</code>", parse_mode="HTML")
 
 @dp.message()
 async def handle_ai_response(message: types.Message):
     chat_id = message.chat.id
     chat_type = message.chat.type
-    
+    user_id = message.from_user.id if message.from_user else chat_id
     text_content = message.text or message.caption or ""
-    image_base64 = None
 
-    if message.photo:
-        try:
-            photo = message.photo[-1]
-            file = await bot.get_file(photo.file_id)
-            file_bytes = await bot.download_file(file.file_path)
-            image_base64 = base64.b64encode(file_bytes.read()).decode('utf-8')
-            if not text_content:
-                text_content = "Оцени картинку без душноты."
-        except Exception as e:
-            logging.error(f"Ошибка загрузки фото: {e}")
-
-    if message.voice:
-        try:
-            await bot.send_chat_action(chat_id=chat_id, action="typing")
-            voice_file = await bot.get_file(message.voice.file_id)
-            voice_bytes = await bot.download_file(voice_file.file_path)
-            voice_io = BytesIO(voice_bytes.read())
-            voice_io.name = "voice.oga"
-
-            transcript_response = await asyncio.get_running_loop().run_in_executor(
-                None,
-                lambda: groq_client.audio.transcriptions.create(
-                    model="whisper-large-v3",
-                    file=voice_io,
-                    response_format="text"
-                )
-            )
-            text_content = transcript_response if isinstance(transcript_response, str) else transcript_response.text
-        except Exception as e:
-            logging.error(f"Ошибка распознавания голосового: {e}")
-            text_content = "Бро, звук словил сбой. Повтори текстом."
-
-    if not text_content and not image_base64:
+    if not text_content and not message.photo and not message.voice:
         return
 
-    lower_text = text_content.lower()
+    # --- ПРОВЕРКА ЛИМИТОВ ТОЛЬКО В ЛИЧНЫХ СООБЩЕНИЯХ ---
+    if chat_type == "private":
+        now = time.time()
+        if user_id not in user_rate_limits:
+            user_rate_limits[user_id] = []
+        
+        # Очищаем старые тайстампы
+        user_rate_limits[user_id] = [t for t in user_rate_limits[user_id] if now - t < RATE_LIMIT_PERIOD]
+        
+        if len(user_rate_limits[user_id]) >= RATE_LIMIT_COUNT:
+            await message.reply("⚠️ <b>Порожняк не гони, тормози!</b> Слишком часто пишешь в личку, дай передохнуть.", parse_mode="HTML")
+            return
+            
+        user_rate_limits[user_id].append(now)
 
-    behavior_triggers = ["будь ", "стань ", "общайся как ", "говори как ", "веди себя как "]
-    if any(lower_text.startswith(trig) or f" {trig}" in lower_text for trig in behavior_triggers):
-        chat_custom_instructions[chat_id] = f"{BASE_INSTRUCTION}\n\nТЕКУЩИЙ ПРИКАЗ ПОЛЬЗОВАТЕЛЯ ПО ПОВЕДЕНИЮ: {text_content}"
-        chat_history[chat_id] = []
-        await message.reply(f"🫡 Принято! Перестраиваю поведение под запрос.", parse_mode="HTML")
-        return
-
-    is_voice_requested = lower_text.startswith("озв") or lower_text.startswith("скаж") or "озвучь" in lower_text or "скажи голосом" in lower_text
-
-    should_answer = False
-    if chat_type == "private" or getattr(message, "business_connection_id", None) or is_voice_requested:
-        should_answer = True
-    else:
-        if message.reply_to_message and message.reply_to_message.from_user:
-            if message.reply_to_message.from_user.id == (await bot.get_me()).id:
-                should_answer = True
-        if f"@{BOT_USERNAME}".lower() in text_content.lower():
-            should_answer = True
-            text_content = text_content.replace(f"@{BOT_USERNAME}", "").strip()
-        if not should_answer:
-            group_message_counters[chat_id] = group_message_counters.get(chat_id, 0) + 1
-            if group_message_counters[chat_id] >= 15:
-                group_message_counters[chat_id] = 0
-                should_answer = True
-
-    if not should_answer:
-        return
-
+    # Обработка реакций
     requested_emoji = parse_requested_emoji(text_content)
-    if requested_emoji and not is_voice_requested and not any(trig in lower_text for trig in ["сгенерируй", "нарисуй", "создай", "озвучь"]):
+    if requested_emoji:
         try:
             target_msg_id = message.reply_to_message.message_id if message.reply_to_message else message.message_id
             await bot.set_message_reaction(
@@ -185,38 +142,13 @@ async def handle_ai_response(message: types.Message):
             )
             return
         except Exception as e:
-            logging.error(f"Ошибка установки реакции: {e}")
+            logging.error(f"Ошибка реакций: {e}")
 
-    if is_voice_requested:
-        words = text_content.split()
-        speech_prompt = " ".join(words[1:]) if len(words) > 1 else text_content
-        speech_prompt = speech_prompt or "Мда, пустой текст."
-
-        await bot.send_chat_action(chat_id=chat_id, action="record_voice")
-        try:
-            clean_for_speech = speech_prompt.replace('"', '').replace("'", "").replace('«', '').replace('»', '').replace('*', '')
-            tts = gTTS(text=clean_for_speech, lang='ru', slow=False)
-            audio_path = "voice_temp.ogg"
-            tts.save(audio_path)
-            
-            audio_file = types.FSInputFile(audio_path)
-            await message.reply_voice(
-                voice=audio_file,
-                caption=f"🎙️ <b>{html.escape(speech_prompt)}</b>",
-                parse_mode="HTML"
-            )
-            if os.path.exists(audio_path):
-                os.remove(audio_path)
-            return
-        except Exception as e:
-            logging.error(f"КРИТИЧЕСКАЯ ОШИБКА ГЕНЕРАЦИИ ГОЛОСА: {e}")
-            await message.reply(f"⚠️ Ошибка озвучки: {e}")
-            return
-
-    generation_triggers = ["сгенерируй", "нарисуй", "создай картинку", "сделай аву", "картинка с", "аватарка", "изображение"]
-    if any(trigger in lower_text for trigger in generation_triggers):
+    # Генерация картинок
+    lower_text = text_content.lower()
+    if any(trig in lower_text for trig in ["сгенерируй", "нарисуй", "создай картинку", "аватарка"]):
         clean_prompt = text_content
-        for trig in generation_triggers:
+        for trig in ["сгенерируй", "нарисуй", "создай картинку", "аватарка"]:
             clean_prompt = clean_prompt.replace(trig, "").strip()
         clean_prompt = clean_prompt or text_content
 
@@ -226,23 +158,21 @@ async def handle_ai_response(message: types.Message):
             await message.reply_photo(photo=image_url, caption=f"🎨 <b>{html.escape(clean_prompt)}</b>", parse_mode="HTML")
             return
         except Exception as e:
-            logging.error(f"Ошибка генерации картинки: {e}")
-            await message.reply("⚠️ Сервер картинок прилёг.")
+            logging.error(f"Ошибка картинок: {e}")
             return
 
     if chat_id not in chat_custom_instructions:
         chat_custom_instructions[chat_id] = BASE_INSTRUCTION
 
-    mirror_adaptation = f"\n\n[ВАЙБ]: Пользователь написал: '{text_content}'. Жги, поддерживай безумный вайб, не давай чату скучать."
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
     await bot.send_chat_action(chat_id=chat_id, action="typing")
     chat_history[chat_id].append({"role": "user", "content": text_content})
-    if len(chat_history[chat_id]) > 4:
-        chat_history[chat_id] = chat_history[chat_id][-4:]
+    if len(chat_history[chat_id]) > 6:
+        chat_history[chat_id] = chat_history[chat_id][-6:]
 
-    messages_payload = [{"role": "system", "content": chat_custom_instructions[chat_id] + mirror_adaptation}] + chat_history[chat_id]
+    messages_payload = [{"role": "system", "content": chat_custom_instructions[chat_id]}] + chat_history[chat_id]
 
     reply_text = None
     for model_name in CANDIDATE_MODELS:
@@ -252,7 +182,7 @@ async def handle_ai_response(message: types.Message):
             if reply_text:
                 break
         except Exception as e:
-            logging.warning(f"Модель {model_name} словила ошибку: {e}")
+            logging.warning(f"Модель {model_name} ошибка: {e}")
             continue
 
     if reply_text:
@@ -271,4 +201,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-                        
+    
