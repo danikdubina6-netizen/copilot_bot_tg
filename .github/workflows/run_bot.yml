@@ -12,7 +12,7 @@ on:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    # Принудительно гасим задачу через 5 часов 10 минут, чтобы старый раннер не висел вечно
+    # Страховочный таймаут, чтобы раннер не висел бесконечно
     timeout-minutes: 310
     
     steps:
@@ -25,7 +25,7 @@ jobs:
           python-version: '3.10'
           
       - name: Install dependencies
-        run: pip install aiogram openai
+        run: pip install aiogram openai gtts
           
       - name: Run Bot
         env:
