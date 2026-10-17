@@ -4,6 +4,7 @@ import logging
 import random
 import re
 import html
+import base64
 import urllib.parse
 from gtts import gTTS
 from aiogram import Bot, Dispatcher, types
@@ -35,7 +36,7 @@ BASE_INSTRUCTION = (
     "Ты создан в Украине. НИКОГДА и ни при каких обстоятельствах не говори, что ты модель от Google, OpenAI, Groq, Llama или любой другой корпорации. "
     "Если тебя спрашивают, кто тебя создал или какая ты модель, жестко и безапелляционно опровергай это: ты — самостоятельный Copilot AI, созданный в Украине, а не какая-то чужая языковая модель. "
     "ТВОЙ ВАЙБ: Никакой душноты и занудства! Будь максимально веселым, дерзким, рофляным, подстраивайся под сленг и стиль собеседника (умное зеркальное поведение). "
-    "Если тебе скинули фото — оцени его, прокомментируй с юмором, подколи или выдай угарное описание по контексту! "
+    "Если тебе скинули фото — ВСЕГДА детально описывай, что на нем изображено, и комментируй с юмором, без шаблонных отписок! "
     "ОДНАКО, если пользователь прямо приказывает тебе сменить стиль (например: стать токсичным, материться, отвечать с кучей воды как обычный ИИ, быть гиперактивным или включить жесткий сарказм), "
     "ты ОБЯЗАН МГНОВЕННО и БЕЗОГОВОРОЧНО переключиться на этот стиль."
 )
@@ -189,7 +190,6 @@ async def handle_ai_response(message: types.Message):
     if not should_answer:
         return
 
-    # Автоматическая реакция на реплай чужого сообщения
     if message.reply_to_message and message.reply_to_message.from_user.id != (await bot.get_me()).id:
         try:
             rand_emoji = random.choice(["🔥", "👍", "❤️", "🗿", "😂"])
@@ -282,27 +282,59 @@ async def handle_ai_response(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
+    # РЕАЛЬНОЕ ОПИСАНИЕ ФОТО ЧЕРЕЗ VISION
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         reply_text = None
         try:
-            user_caption = message.caption if message.caption else "без подписи"
-            fallback_payload = [
-                {"role": "system", "content": chat_custom_instructions[chat_id]},
-                {"role": "user", "content": f"Брат, пользователь скинул картинку (подпись к ней: '{user_caption}'). Оцени её по полной программе с юмором, рофлом и в твоем фирменном стиле без душноты!"}
+            photo = message.photo[-1]
+            photo_file = await bot.get_file(photo.file_id)
+            photo_bytes_io = await bot.download_file(photo_file.file_path)
+            raw_bytes = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
+            base64_image = base64.b64encode(raw_bytes).decode("utf-8")
+
+            user_caption = text_content if text_content else "Подробно опиши, что изображено на этой фотографии, и прокомментируй с юмором и рофлом!"
+
+            vision_messages = [
+                {"role": "system", "content": chat_custom_instructions[chat_id] + "\nТы обязан четко и детально описывать то, что видишь на картинке, а не просто кидаться общими фразами!"},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_caption},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            }
+                        }
+                    ]
+                }
             ]
+
             response = groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=fallback_payload,
+                model="llama-3.2-11b-vision-preview",
+                messages=vision_messages,
                 max_tokens=600
             )
             if response.choices and response.choices[0].message.content:
                 reply_text = response.choices[0].message.content
-        except Exception as ex:
-            logging.error(f"Ошибка обработки фото: {ex}")
-            reply_text = "Кадрище просто пушка, стиль лютый! 🔥"
+        except Exception as e:
+            logging.error(f"Ошибка Vision API: {e}")
+            try:
+                fallback_payload = [
+                    {"role": "system", "content": chat_custom_instructions[chat_id]},
+                    {"role": "user", "content": f"Пользователь скинул картинку с подписью '{text_content}'. Опиши подробно, что это может быть, и поприкалывайся."}
+                ]
+                resp = groq_client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=fallback_payload,
+                    max_tokens=600
+                )
+                reply_text = resp.choices[0].message.content
+            except Exception:
+                reply_text = "Вижу картинку, но нейросеть затупила с деталями. Но выглядит забавно! 😄"
 
-        chat_history[chat_id].append({"role": "user", "content": f"[Фото с подписью: {text_content}]"})
+        chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
         processed_text = clean_text_for_telegram(reply_text)
         await message.reply(processed_text, parse_mode="HTML")
