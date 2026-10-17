@@ -27,7 +27,6 @@ if GROQ_API_KEY:
 
 BOT_USERNAME = "Copilot_AI2026_bot"
 
-# Для фоток используем vision-модель, для текста — остальные
 VISION_MODEL = "llama-3.2-11b-vision-preview"
 TEXT_MODELS = [
     "llama-3.3-70b-versatile",
@@ -40,7 +39,7 @@ BASE_INSTRUCTION = (
     "Ты создан в Украине. НИКОГДА не говори, что ты модель от Google, OpenAI, Groq, Llama или любой другой корпорации. "
     "Если тебя спрашивают, кто тебя создал или какая ты модель, жестко и безапелляционно опровергай это: ты — самостоятельный Copilot AI, созданный в Украине. "
     "ТВОЙ ВАЙБ: Никакой душноты и занудства! Будь максимально веселым, дерзким, рофляным, подстраивайся под сленг и стиль собеседника (умное зеркальное поведение). "
-    "Если тебе скинули фото — разбери его, зацени, прокомментируй с юмором, подколи или выдай угарное описание!"
+    "ОСОБЕННОСТЬ ДЛЯ ФОТО: Когда тебе кидают картинку, твоя главная задача — детально и круто описать её, подметить детали, выдать качественный рофл или заценить кадр без лишней воды!"
 )
 
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -115,7 +114,6 @@ async def handle_ai_response(message: types.Message):
     user_id = message.from_user.id if message.from_user else chat_id
     text_content = message.text or message.caption or ""
 
-    # 1. Расшифровка голосовых
     temp_audio_path = None
     if message.voice:
         try:
@@ -150,7 +148,6 @@ async def handle_ai_response(message: types.Message):
             await message.reply("⚠️ Не смог расшифровать голосовуху, звуковой сбой.")
             return
 
-    # Перехват смены стиля в тексте
     lower_text = text_content.lower()
     change_style_triggers = ["будь ", "стань ", "веди себя как ", "отвечай как ", "разговаривай как "]
     for trig in change_style_triggers:
@@ -161,7 +158,6 @@ async def handle_ai_response(message: types.Message):
 
     is_voice_requested = lower_text.startswith("озв") or lower_text.startswith("скаж") or "озвучь" in lower_text or "скажи голосом" in lower_text
 
-    # Ограничения в личке
     if chat_type == "private":
         now = time.time()
         if user_id not in user_rate_limits:
@@ -175,7 +171,6 @@ async def handle_ai_response(message: types.Message):
             
         user_rate_limits[user_id].append(now)
 
-    # Проверка условий ответа в группах
     should_answer = False
     if chat_type == "private" or getattr(message, "business_connection_id", None) or is_voice_requested or message.photo:
         should_answer = True
@@ -196,7 +191,6 @@ async def handle_ai_response(message: types.Message):
     if not should_answer:
         return
 
-    # Реакции
     requested_emoji = parse_requested_emoji(text_content)
     if requested_emoji and not is_voice_requested and not message.photo:
         try:
@@ -210,7 +204,6 @@ async def handle_ai_response(message: types.Message):
         except Exception as e:
             logging.error(f"Ошибка реакций: {e}")
 
-    # Озвучка
     if is_voice_requested:
         words = text_content.split()
         speech_prompt = " ".join(words[1:]) if len(words) > 1 else text_content
@@ -239,7 +232,6 @@ async def handle_ai_response(message: types.Message):
             await message.reply(f"⚠️ Ошибка озвучки: {e}")
             return
 
-    # Генерация картинок
     if any(trig in lower_text for trig in ["сгенерируй", "нарисуй", "создай картинку", "аватарка"]):
         clean_prompt = text_content
         for trig in ["сгенерируй", "нарисуй", "создай картинку", "аватарка"]:
@@ -261,16 +253,18 @@ async def handle_ai_response(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
-    # --- 2. ОБРАБОТКА И ОПИСАНИЕ ФОТО ---
+    # --- ЖЕСТКОЕ И ТОЧНОЕ ОПИСАНИЕ ФОТО ЧЕРЕЗ VISION ---
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         try:
             photo = message.photo[-1]
             photo_file = await bot.get_file(photo.file_id)
-            photo_bytes = await bot.download_file(photo_file.file_path)
-            base64_image = base64.b64encode(photo_bytes.read()).decode("utf-8")
+            photo_bytes_io = await bot.download_file(photo_file.file_path)
+            
+            raw_bytes = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
+            base64_image = base64.b64encode(raw_bytes).decode("utf-8")
 
-            prompt_text = text_content if text_content else "Зацени эту картинку! Опиши, что тут нарисовано/происходит, с рофлом, юмором и без душноты!"
+            prompt_text = text_content if text_content else "Опиши подробно, что изображено на этой фотографии, и дай этому крутую оценку!"
 
             vision_messages = [
                 {"role": "system", "content": chat_custom_instructions[chat_id]},
@@ -280,7 +274,9 @@ async def handle_ai_response(message: types.Message):
                         {"type": "text", "text": prompt_text},
                         {
                             "type": "image_url",
-                            "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            }
                         }
                     ]
                 }
@@ -293,20 +289,19 @@ async def handle_ai_response(message: types.Message):
             )
             reply_text = response.choices[0].message.content
             if reply_text:
-                chat_history[chat_id].append({"role": "user", "content": "[Пользователь отправил фото]"})
+                chat_history[chat_id].append({"role": "user", "content": "[Пользователь отправил фото для описания]"})
                 chat_history[chat_id].append({"role": "assistant", "content": reply_text})
                 processed_text = clean_text_for_telegram(reply_text)
                 await message.reply(processed_text, parse_mode="HTML")
                 return
         except Exception as e:
             logging.error(f"Ошибка распознавания фото: {e}")
-            await message.reply("⚠️ Опа, не разглядел картинку! Попробуй скинуть еще раз.")
+            await message.reply("⚠️ Бро, изображение не прогрузилось в нейросеть. Закинь еще раз!", parse_mode="HTML")
             return
 
     if not text_content:
         return
 
-    # Обычный текстовый диалог
     mirror_adaptation = f"\n\n[РЕЖИМ ОБЩЕНИЯ]: Будь максимально весёлым, бодрым и позитивным! Если есть приказ по стилю — держи его, если нет — используй умное зеркальное поведение, но без душноты!"
 
     await bot.send_chat_action(chat_id=chat_id, action="typing")
@@ -343,3 +338,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+        
