@@ -155,12 +155,20 @@ async def handle_ai_response(message: types.Message):
     if not should_answer:
         return
 
-    # Ставим реакцию строго на текущее сообщение пользователя без сбоев
+    # --- СТАВИМ СИСТЕМНУЮ РЕАКЦИЮ НА СООБЩЕНИЕ ПОЛЬЗОВАТЕЛЯ ---
     try:
-        chosen_emoji = parse_requested_emoji(text_content) or ("🔥" if (message.photo or message.voice) else random.choice(["👍", "🔥", "⚡️", "❤️", "🗿", "😂"]))
-        await bot.set_message_reaction(chat_id=chat_id, message_id=message.message_id, reaction=[types.ReactionTypeEmoji(emoji=chosen_emoji)])
+        chosen_emoji = parse_requested_emoji(text_content)
+        if chosen_emoji:
+            await bot.set_message_reaction(
+                chat_id=chat_id,
+                message_id=message.message_id,
+                reaction=[types.ReactionTypeEmoji(emoji=chosen_emoji)]
+            )
+            # Если это был чистый запрос реакции (без генерации или озвучки) — останавливаемся
+            if not is_voice_requested and not any(trig in lower_text for trig in ["сгенерируй", "нарисуй", "создай", "озвучь"]):
+                return
     except Exception as e:
-        logging.error(f"Ошибка реакций: {e}")
+        logging.error(f"Ошибка установки реакции: {e}")
 
     if is_voice_requested:
         words = text_content.split()
@@ -248,3 +256,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
