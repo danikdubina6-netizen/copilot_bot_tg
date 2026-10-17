@@ -255,16 +255,20 @@ async def handle_ai_response(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
-    # УНИКАЛЬНАЯ ОБРАБОТКА И ОПИСАНИЕ ФОТО ЧЕРЕЗ TELEGRAM URL С ДИНАМИЧЕСКИМ ФОЛЛБЭКОМ
+    # ГАРАНТИРОВАННАЯ ОБРАБОТКА И ОПИСАНИЕ ФОТО
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         reply_text = None
         try:
             photo = message.photo[-1]
             photo_file = await bot.get_file(photo.file_id)
-            file_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{photo_file.file_path}"
+            
+            photo_bytes_io = await bot.download_file(photo_file.file_path)
+            raw_bytes = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
+            
+            base64_image = base64.b64encode(raw_bytes).decode("utf-8")
 
-            prompt_text = text_content if text_content else "Подробно опиши, что изображено на этой фотографии, и прокомментируй с юмором, без душноты!"
+            prompt_text = text_content if text_content else "Подробно опиши, что или кто изображен на этой фотографии, и прокомментируй с рофлом!"
 
             vision_messages = [
                 {"role": "system", "content": chat_custom_instructions[chat_id]},
@@ -275,7 +279,7 @@ async def handle_ai_response(message: types.Message):
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": file_url
+                                "url": f"data:image/jpeg;base64,{base64_image}"
                             }
                         }
                     ]
@@ -289,26 +293,29 @@ async def handle_ai_response(message: types.Message):
             )
             if response.choices and response.choices[0].message.content:
                 reply_text = response.choices[0].message.content
+
         except Exception as e:
             logging.error(f"Ошибка Vision API: {e}")
 
         if not reply_text:
             try:
+                user_question = text_content if text_content else "Что на фото?"
                 fallback_payload = [
                     {"role": "system", "content": chat_custom_instructions[chat_id]},
-                    {"role": "user", "content": "Брат, я скинул новую фотку, оцени её по полной программе с юмором, подметив крутые детали!"}
+                    {"role": "user", "content": f"Пользователь скинул фото и спросил: '{user_question}'. Ответь весело, поприкалывайся!"}
                 ]
                 response = groq_client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
                     messages=fallback_payload,
                     max_tokens=1000
                 )
-                reply_text = response.choices[0].message.content
+                if response.choices and response.choices[0].message.content:
+                    reply_text = response.choices[0].message.content
             except Exception as ex:
-                logging.error(f"Ошибка фолльбэка фото: {ex}")
-                reply_text = "Красивый кадр, зачет! 📸"
+                logging.error(f"Ошибка фолльбэка: {ex}")
+                reply_text = "⚠️ <b>Лимит токенов Copilot AI!</b> Сделай /reset."
 
-        chat_history[chat_id].append({"role": "user", "content": "[Пользователь скинул фото]"})
+        chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
         processed_text = clean_text_for_telegram(reply_text)
         await message.reply(processed_text, parse_mode="HTML")
@@ -353,4 +360,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-        
+    
