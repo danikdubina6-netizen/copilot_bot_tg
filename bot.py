@@ -234,19 +234,39 @@ async def handle_ai_response(message: types.Message):
             await message.reply(f"⚠️ Ошибка озвучки: {e}")
             return
 
-    if any(trig in lower_text for trig in ["сгенерируй", "нарисуй", "создай картинку", "аватарка"]):
+    # УМНАЯ ГЕНЕРАЦИЯ КАРТИНОК С ПЕРЕВОДОМ НА АНГЛИЙСКИЙ
+    if any(trig in lower_text for trig in ["сгенерируй", "нарисуй", "создай картинку", "аватарка", "изображение"]):
         clean_prompt = text_content
-        for trig in ["сгенерируй", "нарисуй", "создай картинку", "аватарка"]:
-            clean_prompt = clean_prompt.replace(trig, "").strip()
+        for trig in ["сгенерируй", "нарисуй", "создай картинку", "создай", "изображение", "картинку", "аватарка", "где"]:
+            clean_prompt = re.sub(re.escape(trig), "", clean_prompt, flags=re.IGNORECASE).strip()
+            
         clean_prompt = clean_prompt or text_content
 
         await bot.send_chat_action(chat_id=chat_id, action="upload_photo")
-        image_url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(clean_prompt)}?model=flux&width=1024&height=1024&nologo=true&seed={random.randint(1, 999999)}"
+        
+        english_prompt = clean_prompt
+        try:
+            translation_res = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": "Translate the user query into a concise, high-quality image generation prompt in English. Output ONLY the English text, no explanations, no quotes."},
+                    {"role": "user", "content": clean_prompt}
+                ],
+                max_tokens=100
+            )
+            if translation_res.choices and translation_res.choices[0].message.content:
+                english_prompt = translation_res.choices[0].message.content.strip()
+        except Exception as e:
+            logging.error(f"Ошибка перевода промпта: {e}")
+
+        encoded_prompt = urllib.parse.quote(english_prompt)
+        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model=flux&width=1024&height=1024&nologo=true&seed={random.randint(1, 999999)}"
+        
         try:
             await message.reply_photo(photo=image_url, caption=f"🎨 <b>{html.escape(clean_prompt)}</b>", parse_mode="HTML")
             return
         except Exception as e:
-            logging.error(f"Ошибка картинок: {e}")
+            logging.error(f"Ошибка генерации картинки: {e}")
             return
 
     if chat_id not in chat_custom_instructions:
@@ -360,4 +380,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+            
