@@ -59,7 +59,7 @@ BASE_INSTRUCTION = (
     "Ты создан в Украине. НИКОГДА и ни при каких обстоятельствах не говори, что ты модель от Google, OpenAI, Groq, Llama или любой другой корпорации. "
     "Если тебя спрашивают, кто тебя создал или какая ты модель, жестко и безапелляционно опровергай это: ты — самостоятельный Copilot AI, созданный в Украине, а не какая-то чужая языковая модель. "
     "ТВОЙ ВАЙБ: Никакой душноты и занудства! Будь максимально веселым, дерзким, рофляным, подстраивайся под сленг и стиль собеседника (умное зеркальное поведение). "
-    "Если тебе скинули фото — ВСЕГДА детально описывай, что на нем изображено, и комментируй с юмором! "
+    "Если тебя скинули фото — ВСЕГДА детально описывай, что на нем изображено, и комментируй с юмором! "
     "ОДНАКО, если пользователь прямо приказывает тебе сменить стиль (например: стать токсичным, материться, отвечать с кучей воды как обычный ИИ, быть гиперактивным или включить жесткий сарказм), "
     "ты ОБЯЗАН МГНОВЕННО и БЕЗОГОВОРОЧНО переключиться на этот стиль."
 )
@@ -353,7 +353,7 @@ async def handle_ai_response(message: types.Message):
 
     reply_text = None
     
-    # Жесткий перебор ключей с отловом лимитов (429 / rate_limit)
+    # Пытаемся получить ответ через пул ключей
     for attempt in range(len(API_KEYS) if API_KEYS else 1):
         client = get_groq_client()
         if not client:
@@ -365,33 +365,34 @@ async def handle_ai_response(message: types.Message):
                     messages=messages_payload, 
                     max_tokens=600
                 )
-                reply_text = response.choices[0].message.content
-                if reply_text:
+                res_content = response.choices[0].message.content
+                if res_content and res_content.strip():
+                    reply_text = res_content.strip()
                     break
             except Exception as e:
                 err_str = str(e).lower()
+                logging.error(f"⚠️ Ошибка модели {model_name} на ключе #{current_key_index + 1}: {e}")
                 if "rate_limit" in err_str or "429" in err_str or "limit" in err_str:
-                    logging.warning(f"⚠️ Лимит на ключе #{current_key_index + 1}: {e}")
                     rotate_key()
-                    client = get_groq_client()
-                else:
-                    logging.warning(f"⚠️ Ошибка модели {model_name}: {e}")
                 continue
         if reply_text:
             break
 
-    # Аварийный фоллбэк на первом ключе через 8b модель
-    if not reply_text and API_KEYS:
+    # Жесткий страховой фоллбэк: если всё упало, долбим напрямую 8b модель
+    if not reply_text:
         try:
-            emergency_client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=API_KEYS[0])
-            fallback_res = emergency_client.chat.completions.create(
-                model="llama-3.1-8b-instant",
-                messages=messages_payload,
-                max_tokens=300
-            )
-            reply_text = fallback_res.choices[0].message.content
+            emergency_key = API_KEYS[0] if API_KEYS else os.getenv("GROQ_API_KEY")
+            if emergency_key:
+                emergency_client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=emergency_key)
+                fallback_res = emergency_client.chat.completions.create(
+                    model="llama-3.1-8b-instant",
+                    messages=messages_payload,
+                    max_tokens=300
+                )
+                reply_text = fallback_res.choices[0].message.content.strip()
         except Exception as ex:
-            logging.error(f"Аварийный фоллбэк тоже лег: {ex}")
+            logging.error(f"Аварийный фоллбэк тоже сдох: {ex}")
+            reply_text = "Бро, сервера Groq жестко легли и не отдают токены. Дай им пару минут очухаться! ⚡️"
 
     if reply_text:
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -400,20 +401,11 @@ async def handle_ai_response(message: types.Message):
             await message.reply(processed_text, parse_mode="HTML")
         except Exception:
             await message.reply(html.escape(processed_text), parse_mode="HTML")
-    else:
-        fallback_jokes = [
-            "На связи, бро! Чего кашляем, какой следующий вопрос? 🔥",
-            "Секунду, перехватил волну. Давай по новой, я весь вниманием! ⚡️",
-            "Мой нейросетевой аппарат на месте. Что за задача на этот раз? 🤖"
-        ]
-        reply_text = random.choice(fallback_jokes)
-        chat_history[chat_id].append({"role": "assistant", "content": reply_text})
-        await message.reply(reply_text, parse_mode="HTML")
 
 async def main():
-    print(">>> Copilot AI запущен с пулом ключей и умной ротацией! <<<")
+    print(">>> Copilot AI запущен с исправленным пулом ключей! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-            
+    
