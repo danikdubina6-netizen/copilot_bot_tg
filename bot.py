@@ -45,6 +45,7 @@ dp = Dispatcher()
 
 chat_history = {}
 chat_custom_instructions = {}
+group_message_counters = {}
 
 user_rate_limits = {}
 RATE_LIMIT_COUNT = 6
@@ -85,7 +86,7 @@ def parse_requested_emoji(text: str) -> str | None:
 async def start_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.answer("Здарова! Я <b>Copilot AI</b>. Распознавание строго на русском настроено, погнали!", parse_mode="HTML")
+    await message.answer("Здарова! Я <b>Copilot AI</b>. Счетчик для групп и лимиты активированы!", parse_mode="HTML")
 
 @dp.message(Command("reset"))
 async def reset_cmd(message: types.Message):
@@ -151,6 +152,7 @@ async def handle_ai_response(message: types.Message):
     lower_text = text_content.lower()
     is_voice_requested = lower_text.startswith("озв") or lower_text.startswith("скаж") or "озвучь" in lower_text or "скажи голосом" in lower_text
 
+    # --- ПРОВЕРКА ЛИМИТОВ ТОЛЬКО В ЛИЧНЫХ СООБЩЕНИЯХ ---
     if chat_type == "private":
         now = time.time()
         if user_id not in user_rate_limits:
@@ -163,6 +165,27 @@ async def handle_ai_response(message: types.Message):
             return
             
         user_rate_limits[user_id].append(now)
+
+    # --- ФИЛЬТР ДЛЯ ГРУПП (ЧТОБЫ НЕ СПАМИЛ) ---
+    should_answer = False
+    if chat_type == "private" or getattr(message, "business_connection_id", None) or is_voice_requested:
+        should_answer = True
+    else:
+        if message.reply_to_message and message.reply_to_message.from_user:
+            if message.reply_to_message.from_user.id == (await bot.get_me()).id:
+                should_answer = True
+        if f"@{BOT_USERNAME}".lower() in lower_text:
+            should_answer = True
+            text_content = text_content.replace(f"@{BOT_USERNAME}", "").strip()
+            
+        if not should_answer:
+            group_message_counters[chat_id] = group_message_counters.get(chat_id, 0) + 1
+            if group_message_counters[chat_id] >= 15:
+                group_message_counters[chat_id] = 0
+                should_answer = True
+
+    if not should_answer:
+        return
 
     requested_emoji = parse_requested_emoji(text_content)
     if requested_emoji and not is_voice_requested:
@@ -260,4 +283,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+                
