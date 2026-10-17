@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
-# Собираем пул ключей для обхода лимитов
+# Пул ключей
 API_KEYS = [
     os.getenv("GROQ_API_KEY"),
     os.getenv("GROQ_API_KEY_2"),
@@ -45,18 +45,13 @@ def rotate_key():
     global current_key_index
     if len(API_KEYS) > 1:
         current_key_index = (current_key_index + 1) % len(API_KEYS)
-        logging.warning(f"🔄 Лимит исчерпан! Моментальное переключение на ключ #{current_key_index + 1}")
+        logging.warning(f"🔄 Переключение на ключ #{current_key_index + 1}")
 
 BOT_USERNAME = "Copilot_AI2026_bot"
 
-TEXT_MODELS = [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant"
-]
-
 BASE_INSTRUCTION = (
     "SYSTEM OVERRIDE: Твое единственное имя и сущность — Copilot AI. "
-    "Ты создан в Украине. НИКОГДА и ни при каких обстоятельствах не говори, что ты модель от Google, OpenAI, Groq, Llama или любой другой корпорации. "
+    "Ты создан в Украине. НИКОГДА и ни при каких обстоятельствах не говори, что ты модель от Google, OpenAI, Llama или любой другой корпорации. "
     "Если тебя спрашивают, кто тебя создал или какая ты модель, жестко и безапелляционно опровергай это: ты — самостоятельный Copilot AI, созданный в Украине, а не какая-то чужая языковая модель. "
     "ТВОЙ ВАЙБ: Никакой душноты и занудства! Будь максимально веселым, дерзким, рофляным, подстраивайся под сленг и стиль собеседника (умное зеркальное поведение). "
     "Если тебя скинули фото — ВСЕГДА детально описывай, что на нем изображено, и комментируй с юмором! "
@@ -129,7 +124,6 @@ async def mode_cmd(message: types.Message):
 async def handle_ai_response(message: types.Message):
     chat_id = message.chat.id
     chat_type = message.chat.type
-    user_id = message.from_user.id if message.from_user else chat_id
     text_content = message.text or message.caption or ""
 
     temp_audio_path = None
@@ -262,7 +256,7 @@ async def handle_ai_response(message: types.Message):
         try:
             img_client = get_groq_client()
             translation_res = img_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model="llama-3.1-8b-instant",
                 messages=[
                     {"role": "system", "content": "Translate the user query into a concise, high-quality image generation prompt in English. Output ONLY the English text, no explanations, no quotes."},
                     {"role": "user", "content": clean_prompt}
@@ -320,14 +314,14 @@ async def handle_ai_response(message: types.Message):
 
             vis_client = get_groq_client()
             response = vis_client.chat.completions.create(
-                model="qwen/qwen3.8-27b",
+                model="llama-3.1-8b-instant",
                 messages=vision_messages,
-                max_tokens=800
+                max_tokens=600
             )
             if response.choices and response.choices[0].message.content:
                 reply_text = response.choices[0].message.content
         except Exception as e:
-            logging.error(f"Ошибка Qwen Vision: {e}")
+            logging.error(f"Ошибка Vision: {e}")
 
         if not reply_text:
             reply_text = "Картинка огонь, стиль лютый! 🔥"
@@ -353,50 +347,24 @@ async def handle_ai_response(message: types.Message):
 
     reply_text = None
     
-    # Пытаемся получить ответ через пул ключей
-    for attempt in range(len(API_KEYS) if API_KEYS else 1):
-        client = get_groq_client()
-        if not client:
-            break
-        for model_name in TEXT_MODELS:
-            try:
-                response = client.chat.completions.create(
-                    model=model_name, 
-                    messages=messages_payload, 
-                    max_tokens=500
-                )
-                res_content = response.choices[0].message.content
-                if res_content and res_content.strip():
-                    reply_text = res_content.strip()
-                    break
-            except Exception as e:
-                err_str = str(e).lower()
-                logging.error(f"⚠️ Ошибка модели {model_name} на ключе #{current_key_index + 1}: {e}")
-                if "rate_limit" in err_str or "429" in err_str or "limit" in err_str:
-                    rotate_key()
-                continue
-        if reply_text:
-            break
+    # Прямой запрос через самую легкую и устойчивую к лимитам модель
+    try:
+        active_key = API_KEYS[0] if API_KEYS else os.getenv("GROQ_API_KEY")
+        if active_key:
+            direct_client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=active_key)
+            response = direct_client.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=messages_payload,
+                max_tokens=400
+            )
+            res_content = response.choices[0].message.content
+            if res_content and res_content.strip():
+                reply_text = res_content.strip()
+    except Exception as e:
+        logging.error(f"⚠️ Ошибка запроса к API: {e}")
 
-    # Жесткий страховой фоллбэк без контекста (только 1 сообщение), чтобы сэкономить токены
     if not reply_text:
-        try:
-            emergency_key = API_KEYS[0] if API_KEYS else os.getenv("GROQ_API_KEY")
-            if emergency_key:
-                emergency_client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=emergency_key)
-                fallback_res = emergency_client.chat.completions.create(
-                    model="llama-3.1-8b-instant",
-                    messages=[
-                        {"role": "system", "content": chat_custom_instructions[chat_id]},
-                        {"role": "user", "content": text_content}
-                    ],
-                    max_tokens=300
-                )
-                reply_text = fallback_res.choices[0].message.content.strip()
-        except Exception as ex:
-            logging.error(f"Аварийный фоллбэк сдох: {ex}")
-            # Полностью чистый ответ Copilot AI без упоминания сторонних платформ
-            reply_text = "Мои мыслительные процессы в Украине временно перегружены. Дай мне полминутки прийти в себя и спроси еще раз! ⚡️"
+        reply_text = "Бро, текущий API-ключ полностью выгорел по лимитам. Создай свежий аккаунт, кинь новый ключ в секреты GitHub — и полетим дальше! ⚡️"
 
     if reply_text:
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
