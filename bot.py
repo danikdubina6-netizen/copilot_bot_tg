@@ -7,7 +7,6 @@ import html
 import base64
 import urllib.parse
 from io import BytesIO
-from PIL import Image
 from gtts import gTTS
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
@@ -235,6 +234,7 @@ async def handle_ai_response(message: types.Message):
             await message.reply(f"⚠️ Ошибка озвучки: {e}")
             return
 
+    # УМНАЯ ГЕНЕРАЦИЯ КАРТИНОК С ПЕРЕВОДОМ НА АНГЛИЙСКИЙ
     if any(trig in lower_text for trig in ["сгенерируй", "нарисуй", "создай картинку", "аватарка", "изображение"]):
         clean_prompt = text_content
         for trig in ["сгенерируй", "нарисуй", "создай картинку", "создай", "изображение", "картинку", "аватарка", "где"]:
@@ -275,7 +275,7 @@ async def handle_ai_response(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
-    # СЖАТИЕ КАРТИНКИ + ГАРАНТИРОВАННАЯ ОБРАБОТКА И ОПИСАНИЕ ФОТО
+    # ЧИСТАЯ ОБРАБОТКА И ОПИСАНИЕ ФОТО БЕЗ СТОРОННИХ БИБЛИОТЕК
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         reply_text = None
@@ -284,18 +284,10 @@ async def handle_ai_response(message: types.Message):
             photo_file = await bot.get_file(photo.file_id)
             
             photo_bytes_io = await bot.download_file(photo_file.file_path)
-            
-            # Автоматическое сжатие изображения до 800px по ширине/высоте
-            img = Image.open(photo_bytes_io)
-            img.thumbnail((800, 800))
-            if img.mode != 'RGB':
-                img = img.convert('RGB')
-            
-            buffered = BytesIO()
-            img.save(buffered, format="JPEG", quality=80)
-            base64_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
+            raw_bytes = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
+            base64_image = base64.b64encode(raw_bytes).decode("utf-8")
 
-            prompt_text = text_content if text_content else "Подробно опиши, что или кто изображен на этой фотографии, подмети детали и прокомментируй с рофлом!"
+            prompt_text = text_content if text_content else "Подробно опиши, что или кто изображен на этой фотографии, подмети детали и прокомментируй с юмором!"
 
             vision_messages = [
                 {"role": "system", "content": chat_custom_instructions[chat_id]},
@@ -329,7 +321,7 @@ async def handle_ai_response(message: types.Message):
                 user_question = text_content if text_content else "Что на фото?"
                 fallback_payload = [
                     {"role": "system", "content": chat_custom_instructions[chat_id]},
-                    {"role": "user", "content": f"Пользователь скинул картинку 'Топякский кабан' с текстом: '{user_question}'. Зацени тему с юмором!"}
+                    {"role": "user", "content": f"Пользователь скинул картинку с текстом: '{user_question}'. Зацени тему с юмором!"}
                 ]
                 response = groq_client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
@@ -340,7 +332,7 @@ async def handle_ai_response(message: types.Message):
                     reply_text = response.choices[0].message.content
             except Exception as ex:
                 logging.error(f"Ошибка фолльбэка: {ex}")
-                reply_text = "⚠️ <b>Превышен суточный лимит Groq API!</b> Подожди немного или смени API ключ."
+                reply_text = "⚠️ <b>Превышен лимит запросов!</b> Подожди секунду."
 
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -387,4 +379,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-        
+    
