@@ -85,7 +85,7 @@ def parse_requested_emoji(text: str) -> str | None:
 async def start_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.answer("Здарова! Я <b>Copilot AI</b>. Распознавание голосовых подключено, газуем!", parse_mode="HTML")
+    await message.answer("Здарова! Я <b>Copilot AI</b>. Всё на мази, газуем!", parse_mode="HTML")
 
 @dp.message(Command("reset"))
 async def reset_cmd(message: types.Message):
@@ -111,29 +111,36 @@ async def handle_ai_response(message: types.Message):
     user_id = message.from_user.id if message.from_user else chat_id
     text_content = message.text or message.caption or ""
 
-    # --- РАСШИФРОВКА ГОЛОСОВЫХ ЧЕРЕЗ WHISPER ---
+    temp_audio_path = None
     if message.voice:
         try:
             await bot.send_chat_action(chat_id=chat_id, action="typing")
             voice_file = await bot.get_file(message.voice.file_id)
             voice_bytes = await bot.download_file(voice_file.file_path)
-            voice_io = BytesIO(voice_bytes.read())
-            voice_io.name = "voice.oga"
-
-            transcript_response = await asyncio.get_running_loop().run_in_executor(
-                None,
-                lambda: groq_client.audio.transcriptions.create(
-                    model="whisper-large-v3",
-                    file=voice_io,
-                    response_format="text"
-                )
-            )
-            text_content = transcript_response if isinstance(transcript_response, str) else transcript_response.text
             
-            # Показываем пользователю, что именно бот услышал в его ГС
+            temp_audio_path = f"temp_voice_{message.message_id}.ogg"
+            with open(temp_audio_path, "wb") as f:
+                f.write(voice_bytes.read())
+
+            with open(temp_audio_path, "rb") as audio_file:
+                transcript_response = await asyncio.get_running_loop().run_in_executor(
+                    None,
+                    lambda: groq_client.audio.transcriptions.create(
+                        model="whisper-large-v3",
+                        file=audio_file,
+                        response_format="text"
+                    )
+                )
+            
+            if temp_audio_path and os.path.exists(temp_audio_path):
+                os.remove(temp_audio_path)
+
+            text_content = transcript_response if isinstance(transcript_response, str) else transcript_response.text
             await message.reply(f"🎙️ <i>Распознано:</i> <b>{html.escape(text_content)}</b>", parse_mode="HTML")
         except Exception as e:
             logging.error(f"Ошибка распознавания голосового: {e}")
+            if temp_audio_path and os.path.exists(temp_audio_path):
+                os.remove(temp_audio_path)
             await message.reply("⚠️ Не смог расшифровать голосовуху, звуковой сбой.")
             return
 
@@ -175,10 +182,10 @@ async def handle_ai_response(message: types.Message):
         speech_prompt = speech_prompt or "Мда, пустой текст."
 
         await bot.send_chat_action(chat_id=chat_id, action="record_voice")
+        audio_path = f"voice_temp_{random.randint(1000, 9999)}.ogg"
         try:
             clean_for_speech = speech_prompt.replace('"', '').replace("'", "").replace('«', '').replace('»', '').replace('*', '')
             tts = gTTS(text=clean_for_speech, lang='ru', slow=False)
-            audio_path = "voice_temp.ogg"
             tts.save(audio_path)
             
             audio_file = types.FSInputFile(audio_path)
@@ -192,6 +199,8 @@ async def handle_ai_response(message: types.Message):
             return
         except Exception as e:
             logging.error(f"ОШИБКА ГОЛОСА: {e}")
+            if os.path.exists(audio_path):
+                os.remove(audio_path)
             await message.reply(f"⚠️ Ошибка озвучки: {e}")
             return
 
@@ -250,4 +259,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-            
