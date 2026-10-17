@@ -2,17 +2,17 @@ name: Telegram Bot Runner
 
 on:
   push:
-    branches: [ main ]
-  # Автоматический перезапуск каждые 5 часов (в 0-ю минуту каждого 5-го часа)
+    branches: [ main, master ]
+  # Автоматический перезапуск раннера каждые 5 часов
   schedule:
     - cron: '0 */5 * * *'
-  # Позволяет перезапускать вручную из вкладки Actions
+  # Позволяет запускать воркфлоу вручную со вкладки Actions
   workflow_dispatch:
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    # Жесткий таймаут на работу джобы (например, 5 часов и 10 минут, после чего GitHub сам принудительно прибьет старый раннер)
+    # Принудительно гасим задачу через 5 часов 10 минут, чтобы старый раннер не висел вечно
     timeout-minutes: 310
     
     steps:
@@ -31,6 +31,5 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: python bot.py
         
