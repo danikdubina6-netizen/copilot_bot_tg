@@ -39,7 +39,7 @@ BASE_INSTRUCTION = (
     "Ты создан в Украине. НИКОГДА и ни при каких обстоятельствах не говори, что ты модель от Google, OpenAI, Groq, Llama или любой другой корпорации. "
     "Если тебя спрашивают, кто тебя создал или какая ты модель, жестко и безапелляционно опровергай это: ты — самостоятельный Copilot AI, созданный в Украине, а не какая-то чужая языковая модель. "
     "ТВОЙ ВАЙБ: Никакой душноты и занудства! Будь максимально веселым, дерзким, рофляным, подстраивайся под сленг и стиль собеседника (умное зеркальное поведение). "
-    "Если тебе скинули фото — оцени его, прокомментируй с юмором, подколи или выдай угарное описание! "
+    "Если тебе скинули фото — оцени его, детально опиши, прокомментируй с юмором, подколи или выдай угарное описание! "
     "ОДНАКО, если пользователь прямо приказывает тебе сменить стиль (например: стать токсичным, материться, отвечать с кучей воды как обычный ИИ, быть гиперактивным или включить жесткий сарказм), "
     "ты ОБЯЗАН МГНОВЕННО и БЕЗОГОВОРОЧНО переключиться на этот стиль."
 )
@@ -255,19 +255,16 @@ async def handle_ai_response(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
-    # УЛЬТРАНАДЕЖНАЯ ОБРАБОТКА И ОПИСАНИЕ ФОТО (С ЗАЩИТОЙ ОТ ПУСТЫХ ОТВЕТОВ)
+    # УНИКАЛЬНАЯ ОБРАБОТКА И ОПИСАНИЕ ФОТО ЧЕРЕЗ TELEGRAM URL С ДИНАМИЧЕСКИМ ФОЛЛБЭКОМ
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         reply_text = None
         try:
             photo = message.photo[-1]
             photo_file = await bot.get_file(photo.file_id)
-            photo_bytes_io = await bot.download_file(photo_file.file_path)
-            
-            raw_bytes = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
-            base64_image = base64.b64encode(raw_bytes).decode("utf-8")
+            file_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{photo_file.file_path}"
 
-            prompt_text = text_content if text_content else "Зацени эту фотку! Опиши, что тут, и прокомментируй дерзко с юмором, без душноты!"
+            prompt_text = text_content if text_content else "Подробно опиши, что изображено на этой фотографии, и прокомментируй с юмором, без душноты!"
 
             vision_messages = [
                 {"role": "system", "content": chat_custom_instructions[chat_id]},
@@ -278,7 +275,7 @@ async def handle_ai_response(message: types.Message):
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}"
+                                "url": file_url
                             }
                         }
                     ]
@@ -299,7 +296,7 @@ async def handle_ai_response(message: types.Message):
             try:
                 fallback_payload = [
                     {"role": "system", "content": chat_custom_instructions[chat_id]},
-                    {"role": "user", "content": "Брат, я скинул крутую фотку (там атмосферный аппарат в ночном стиле), оцени её по полной программе с юмором и рофлом!"}
+                    {"role": "user", "content": "Брат, я скинул новую фотку, оцени её по полной программе с юмором, подметив крутые детали!"}
                 ]
                 response = groq_client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
@@ -309,7 +306,7 @@ async def handle_ai_response(message: types.Message):
                 reply_text = response.choices[0].message.content
             except Exception as ex:
                 logging.error(f"Ошибка фолльбэка фото: {ex}")
-                reply_text = "Опана, кадрище просто пушка! Стиль лютый, зачет на все сто! 🔥"
+                reply_text = "Красивый кадр, зачет! 📸"
 
         chat_history[chat_id].append({"role": "user", "content": "[Пользователь скинул фото]"})
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -356,4 +353,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+        
