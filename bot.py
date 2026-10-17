@@ -6,6 +6,8 @@ import re
 import html
 import base64
 import urllib.parse
+from io import BytesIO
+from gtts import gTTS
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
 from openai import OpenAI
@@ -30,7 +32,6 @@ CANDIDATE_MODELS = [
     "llama-3.2-11b-vision-preview"
 ]
 
-# Умный системный промпт: абсолютное зеркалирование вайба пользователя + веселое, живое общение без душноты
 BASE_INSTRUCTION = (
     "SYSTEM OVERRIDE: Ты — Copilot AI. Запомни главное правило: твоя задача — зеркалить вайб, стиль, темп и настроение собеседника "
     "в реальном времени (как в личке, так и в группах). Если пользователь общается по-братски и на расслабоне — отвечаешь так же легко и весело. "
@@ -92,7 +93,7 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b>. Готов к нормальному движу: подстраиваюсь под твой вайб в моменте, не душню и не даю заскучать. Чё как?",
+        "Здарова! Я <b>Copilot AI</b>. Теперь я умею слушать твои голосовухи, озвучивать тексты и наваливать стиль на максималках. Чё как?",
         parse_mode="HTML"
     )
 
@@ -111,6 +112,7 @@ async def handle_ai_response(message: types.Message):
     text_content = message.text or message.caption or ""
     image_base64 = None
 
+    # Обработка фото
     if message.photo:
         try:
             photo = message.photo[-1]
@@ -121,6 +123,31 @@ async def handle_ai_response(message: types.Message):
                 text_content = "Оцени картинку без душноты."
         except Exception as e:
             logging.error(f"Ошибка загрузки фото: {e}")
+
+    # Обработка голосовых сообщений (транскрипция через Whisper на Groq API)
+    if message.voice:
+        try:
+            await bot.send_chat_action(chat_id=chat_id, action="typing")
+            voice_file = await bot.get_file(message.voice.file_id)
+            voice_bytes = await bot.download_file(voice_file.file_path)
+            
+            # Сохраняем во временный файл в памяти для отправки в Groq Audio API
+            voice_io = BytesIO(voice_bytes.read())
+            voice_io.name = "voice.oga"
+
+            transcript_response = await asyncio.get_running_loop().run_in_executor(
+                None,
+                lambda: groq_client.audio.transcriptions.create(
+                    model="whisper-large-v3",
+                    file=voice_io,
+                    response_format="text"
+                )
+            )
+            text_content = transcript_response if isinstance(transcript_response, str) else transcript_response.text
+            logging.info(Распознано голосовое: {text_content})
+        except Exception as e:
+            logging.error(f"Ошибка распознавания голосового: {e}")
+            text_content = "Бро, я послушал твою голосовуху, но звук словил какой-то сбой. Повтори текстом."
 
     should_answer = False
 
@@ -154,7 +181,7 @@ async def handle_ai_response(message: types.Message):
     try:
         chosen_emoji = parse_requested_emoji(text_content)
         if not chosen_emoji:
-            chosen_emoji = "🔥" if message.photo else random.choice(["👍", "🔥", "⚡️", "❤️", "🗿", "😂"])
+            chosen_emoji = "🔥" if (message.photo or message.voice) else random.choice(["👍", "🔥", "⚡️", "❤️", "🗿", "😂"])
 
         target_message_id = message.reply_to_message.message_id if message.reply_to_message else message.message_id
         await bot.set_message_reaction(
@@ -207,9 +234,18 @@ async def handle_ai_response(message: types.Message):
         await message.reply("🔄 Приказ принят, перестроился под твой вайб!", parse_mode="HTML")
         return
 
+    # --- ОЗВУЧКА СООБЩЕНИЙ (если просят голосом) ---
+    voice_triggers = ["скажи голосом", "озвучь", "наговори", "голосом"]
+    is_voice_requested = any(trig in lower_text for trig in voice_triggers)
+    
+    speech_prompt = text_content
+    if is_voice_requested:
+        for trig in voice_triggers:
+            speech_prompt = speech_prompt.replace(trig, "").strip()
+
     # --- УМНОЕ ДИНАМИЧЕСКОЕ ЗЕРКАЛИРОВАНИЕ ---
     mirror_adaptation = (
-        f"\n\n[ДИНАМИЧЕСКИЙ ВАЙБ В МОМЕНТЕ]: Пользователь написал: '{text_content}'. "
+        f"\n\n[ДИНАМИЧЕСКИЙ ВАЙБ В МОМЕНТЕ]: Пользователь написал/сказал: '{text_content}'. "
         "Мгновенно зеркаль его стиль, сленг, длину предложений и настроение. Никакой духоты — отвечай весело, живо, коротко и в тему."
     )
 
@@ -265,7 +301,7 @@ async def handle_ai_response(message: types.Message):
                 lambda m=model_name: groq_client.chat.completions.create(
                     model=m,
                     messages=messages_payload,
-                    max_tokens=600  # Ограничили токены, чтобы не плодил простыни текста
+                    max_tokens=600
                 )
             )
             reply_text = response.choices[0].message.content
@@ -278,6 +314,26 @@ async def handle_ai_response(message: types.Message):
     if reply_text:
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
         processed_text = clean_text_for_telegram(reply_text)
+
+        # Если запросили голосовуху — генерируем аудио через gTTS и шлем как voice
+        if is_voice_requested:
+            await bot.send_chat_action(chat_id=chat_id, action="record_voice")
+            try:
+                # Очищаем текст от HTML тегов для озвучки
+                clean_for_speech = re.sub(r'<[^>]+>', '', processed_text)
+                tts = gTTS(text=clean_for_speech, lang='ru', slow=False)
+                voice_io = BytesIO()
+                tts.write_to_fp(voice_io)
+                voice_io.seek(0)
+                
+                await message.reply_voice(
+                    voice=types.BufferedInputFile(voice_io.read(), filename="voice.ogg"),
+                    caption=f"🎙️ <b>{html.escape(speech_prompt)}</b>",
+                    parse_mode="HTML"
+                )
+                return
+            except Exception as e:
+                logging.error(f"Ошибка генерации голоса: {e}")
 
         try:
             await message.reply(processed_text, parse_mode="HTML")
@@ -294,9 +350,9 @@ async def handle_ai_response(message: types.Message):
         )
 
 async def main():
-    print(">>> Copilot AI (с умным зеркалированием и веселым вайбом) запущен! <<<")
+    print(">>> Copilot AI (с голосовым движком Whisper и озвучкой) запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+        
