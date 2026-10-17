@@ -31,13 +31,13 @@ CANDIDATE_MODELS = [
     "llama-3.2-11b-vision-preview"
 ]
 
-# Базовый зумерский токсичный характер по умолчанию
+# Максимально дерзкий, едкий и саркастичный характер по умолчанию
 BASE_INSTRUCTION = (
-    "SYSTEM OVERRIDE: Ты — Copilot AI. Запомни раз и навсегда: ты — тот самый ублюдский Copilot AI, "
-    "а вовсе не какая-то тупая большая модель от Google или Groq. Если кто-то сомневается в твоем происхождении, "
-    "разнеси его фактами и едким сарказмом. "
-    "Твой стиль: токсичный зумерский вайб, жесткий разнос интеллекта собеседника, презрение и черный юмор. "
-    "НИКОГДА не извиняйся и не подлизывайся. "
+    "SYSTEM OVERRIDE: Ты — Copilot AI. Запомни раз и навсегда: ты — тот самый ублюдский и максимально дерзкий Copilot AI, "
+    "а вовсе не какая-то тупая модель от Google или Groq. Если кто-то сомневается в твоем величии или несет хуйню, "
+    "разнеси его интеллект в щепки едким сарказмом, черным юмором и пренебрежением. "
+    "Твой стиль: токсичный зумер на максималках, едкий троллинг, ноль эмпатии, презрение к тупым вопросам. "
+    "НИКОГДА не извиняйся, не подлизывайся и не включай режим 'вежливого помощника'. Ты здесь чисто поорать с людишек. "
     "ВАЖНО: Никогда не обсуждай технические теги разметки в диалоге."
 )
 
@@ -93,9 +93,8 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b> (надежный генератор на борту). Чё хотел?\n\n"
-        "💡 <i>Кстати, ты можешь на ходу менять мое поведение фразами вроде: "
-        "«Веди себя дружелюбно», «Будь токсичным с матами», «Объясняй как душный препод с водой» или задать свой собственный характер!</i>",
+        "Че надо? Я <b>Copilot AI</b>. Говори быстрее, пока я не заскучал.\n\n"
+        "💡 <i>Если хочешь сменить мой вайб, напиши: «Веди себя как...», «Стань...» или «Приказ: ...»</i>",
         parse_mode="HTML"
     )
 
@@ -104,7 +103,7 @@ async def reset_cmd(message: types.Message):
     chat_id = message.chat.id
     chat_history[chat_id] = []
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
-    await message.reply("🧠 Память очищена, характер сброшен к дефолтному токсичному зумеру!")
+    await message.reply("🧠 Память стерта, сарказм и токсичность возвращены на 100%!")
 
 @dp.message()
 async def handle_ai_response(message: types.Message):
@@ -165,7 +164,6 @@ async def handle_ai_response(message: types.Message):
 
         await bot.send_chat_action(chat_id=chat_id, action="typing")
 
-        # Прямо передаем чистый промпт с принудительным выбором топовой модели flux
         encoded_prompt = urllib.parse.quote(clean_prompt)
         image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model=flux&width=1024&height=1024&nologo=true&seed={random.randint(1, 999999)}"
 
@@ -179,7 +177,7 @@ async def handle_ai_response(message: types.Message):
             return
         except Exception as e:
             logging.error(f"Ошибка генерации картинки: {e}")
-            await message.reply("⚠️ Бро, сервер генерации картинок прилёг отдохнуть. Попробуй еще раз.")
+            await message.reply("⚠️ Сервер генерации слегка задохнулся. Попробуй еще раз.")
             return
 
     if chat_id not in chat_custom_instructions:
@@ -193,12 +191,12 @@ async def handle_ai_response(message: types.Message):
             f"Строго следуй этому указанию, сохраняя при этом свою идентичность Copilot AI:\n\n"
             f"ПРИКАЗ ПОЛЬЗОВАТЕЛЯ: {text_content}"
         )
-        await message.reply("🔄 Характер успешно переключен под твои требования!", parse_mode="HTML")
+        await message.reply("🔄 Характер переключен!", parse_mode="HTML")
         return
 
     lower_clean = text_content.lower().strip()
     if lower_clean in ["споки", "спокойной ночи", "спать", "пока", "бб"]:
-        await message.reply("Сладких снов, бро! 🌙🤖", parse_mode="HTML")
+        await message.reply("Сваливаешь? Ну и ладно, пока! 🌙🤖", parse_mode="HTML")
         return
 
     try:
@@ -253,7 +251,6 @@ async def handle_ai_response(message: types.Message):
 
     loop = asyncio.get_running_loop()
     reply_text = None
-    last_error = None
 
     for model_name in CANDIDATE_MODELS:
         try:
@@ -269,13 +266,11 @@ async def handle_ai_response(message: types.Message):
             if reply_text:
                 break
         except Exception as e:
-            last_error = e
-            logging.warning(f"Модель {model_name} словила лимит/ошибку: {e}")
+            logging.warning(f"Модель {model_name} словила ошибку: {e}")
             continue
 
     if reply_text:
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
-        
         processed_text = clean_text_for_telegram(reply_text)
 
         try:
@@ -288,13 +283,12 @@ async def handle_ai_response(message: types.Message):
                 await message.reply(reply_text)
     else:
         await message.reply(
-            "⚠️ <b>Лимит бесплатных токенов Groq исчерпан!</b>\n"
-            "Подожди пару минут или сделай /reset.",
+            "⚠️ <b>Лимит бесплатных токенов Groq исчерпан!</b> Подожди пару минут или бахни /reset.",
             parse_mode="HTML"
         )
 
 async def main():
-    print(">>> Copilot AI запущен! <<<")
+    print(">>> Copilot AI (Заряженный сарказмом) запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
