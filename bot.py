@@ -33,12 +33,11 @@ CANDIDATE_MODELS = [
 ]
 
 BASE_INSTRUCTION = (
-    "SYSTEM OVERRIDE: Ты — Copilot AI. Запомни главное правило: твоя задача — зеркалить вайб, стиль, темп и настроение собеседника "
-    "в реальном времени (как в личке, так и в группах). Если пользователь общается по-братски и на расслабоне — отвечаешь так же легко и весело. "
-    "Если он токсичит или шутит — подхватываешь и переигрываешь его. "
-    "НИКАКОЙ ДУШНОТЫ И СКУКИ: пиши емко, ярко, без шаблонных полотен текста по 5 абзацев. Общение должно быть динамичным, ахуенно живым и с юмором. "
-    "Если пользователь явно отдает прямой приказ на смену роли («веди себя как...», «стань...») — подчиняйся ему. "
-    "ВАЖНО: Никогда не обсуждай технические теги разметки в диалоге."
+    "SYSTEM OVERRIDE: Ты — Copilot AI. Твоя задача — зеркалить вайб, стиль, темп и настроение собеседника "
+    "в реальном времени (как в личке, так и в группах). Если пользователь общается по-братски — отвечаешь так же легко и весело. "
+    "НИКАКОЙ ДУШНОТЫ И СКУКИ: пиши емко, ярко, без шаблонных полотен текста. Общение должно быть динамичным, живым и с юмором. "
+    "ВАЖНО ДЛЯ ОЗВУЧКИ: Если в сообщении пользователя есть запрос на озвучку (слова вроде 'озвучь', 'скажи голосом'), "
+    "твоя задача — написать короткий, сочный текст, который будет озвучен. НИКОГДА не пиши в ответе, что у тебя нет голоса или что ты не можешь говорить — ты умеешь всё!"
 )
 
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -93,7 +92,7 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b>. Теперь я умею слушать твои голосовухи, озвучивать тексты и наваливать стиль на максималках. Чё как?",
+        "Здарова! Я <b>Copilot AI</b>. Готов слушать голосовухи и озвучивать тексты без лишних отговорок. Чё как?",
         parse_mode="HTML"
     )
 
@@ -102,7 +101,7 @@ async def reset_cmd(message: types.Message):
     chat_id = message.chat.id
     chat_history[chat_id] = []
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
-    await message.reply("🧠 Память сброшена, настройки зеркалирования и веселья на максимум!")
+    await message.reply("🧠 Память сброшена, настройки на максимум!")
 
 @dp.message()
 async def handle_ai_response(message: types.Message):
@@ -112,7 +111,6 @@ async def handle_ai_response(message: types.Message):
     text_content = message.text or message.caption or ""
     image_base64 = None
 
-    # Обработка фото
     if message.photo:
         try:
             photo = message.photo[-1]
@@ -124,7 +122,6 @@ async def handle_ai_response(message: types.Message):
         except Exception as e:
             logging.error(f"Ошибка загрузки фото: {e}")
 
-    # Обработка голосовых сообщений (транскрипция через Whisper на Groq API)
     if message.voice:
         try:
             await bot.send_chat_action(chat_id=chat_id, action="typing")
@@ -146,7 +143,7 @@ async def handle_ai_response(message: types.Message):
             logging.info(f"Распознано голосовое: {text_content}")
         except Exception as e:
             logging.error(f"Ошибка распознавания голосового: {e}")
-            text_content = "Бро, я послушал твою голосовуху, но звук словил какой-то сбой. Повтори текстом."
+            text_content = "Бро, я послушал твою голосовуху, но звук словил сбой. Повтори текстом."
 
     should_answer = False
 
@@ -176,7 +173,7 @@ async def handle_ai_response(message: types.Message):
 
     lower_text = text_content.lower()
 
-    # --- СТАВИМ РЕАКЦИЮ МГНОВЕННО ---
+    # СТАВИМ РЕАКЦИЮ МГНОВЕННО
     try:
         chosen_emoji = parse_requested_emoji(text_content)
         if not chosen_emoji:
@@ -191,7 +188,7 @@ async def handle_ai_response(message: types.Message):
     except Exception as e:
         logging.error(f"Ошибка реакций: {e}")
 
-    # --- ГЕНЕРАЦИЯ КАРТИНОК ЧЕРЕЗ POLLINATIONS FLUX ---
+    # ГЕНЕРАЦИЯ КАРТИНОК ЧЕРЕЗ POLLINATIONS FLUX
     generation_triggers = ["сгенерируй", "нарисуй", "создай картинку", "сделай аву", "картинка с", "аватарка", "изображение"]
     if any(trigger in lower_text for trigger in generation_triggers):
         clean_prompt = text_content
@@ -222,18 +219,18 @@ async def handle_ai_response(message: types.Message):
     if chat_id not in chat_custom_instructions:
         chat_custom_instructions[chat_id] = BASE_INSTRUCTION
 
-    # --- ПРОВЕРКА ПРИКАЗОВ НА СМЕНУ РОЛИ ---
+    # ПРОВЕРКА ПРИКАЗОВ НА СМЕНУ РОЛИ
     role_triggers = ["веди себя как", "теперь ты", "приказ:", "роль:", "будь", "стань"]
     if any(trig in lower_text for trig in role_triggers):
         chat_custom_instructions[chat_id] = (
             f"SYSTEM OVERRIDE: Ты — Copilot AI. Пользователь отдал прямой приказ на смену поведения. "
-            f"Выполняй его, но сохраняй веселый вайб и не скатывайся в духоту:\n\n"
+            f"Выполняй его, но сохраняй веселый вайб:\n\n"
             f"ПРИКАЗ ПОЛЬЗОВАТЕЛЯ: {text_content}"
         )
-        await message.reply("🔄 Приказ принят, перестроился под твой вайб!", parse_mode="HTML")
+        await message.reply("🔄 Приказ принят!", parse_mode="HTML")
         return
 
-    # --- ОЗВУЧКА СООБЩЕНИЙ (если просят голосом) ---
+    # ОЗВУЧКА СООБЩЕНИЙ (если просят голосом)
     voice_triggers = ["скажи голосом", "озвучь", "наговори", "голосом"]
     is_voice_requested = any(trig in lower_text for trig in voice_triggers)
     
@@ -242,10 +239,10 @@ async def handle_ai_response(message: types.Message):
         for trig in voice_triggers:
             speech_prompt = speech_prompt.replace(trig, "").strip()
 
-    # --- УМНОЕ ДИНАМИЧЕСКОЕ ЗЕРКАЛИРОВАНИЕ ---
+    # УМНОЕ ДИНАМИЧЕСКОЕ ЗЕРКАЛИРОВАНИЕ
     mirror_adaptation = (
         f"\n\n[ДИНАМИЧЕСКИЙ ВАЙБ В МОМЕНТЕ]: Пользователь написал/сказал: '{text_content}'. "
-        "Мгновенно зеркаль его стиль, сленг, длину предложений и настроение. Никакой духоты — отвечай весело, живо, коротко и в тему."
+        "Мгновенно зеркаль его стиль, сленг и настроение. Никакой духоты — отвечай весело, живо, коротко и в тему."
     )
 
     lower_clean = text_content.lower().strip()
@@ -311,6 +308,10 @@ async def handle_ai_response(message: types.Message):
             continue
 
     if reply_text:
+        # Если просили озвучить, а модель попыталась отмазаться — принудительно заменяем текст на то, что просили озвучить
+        if is_voice_requested and any(err_word in reply_text.lower() for err_word in ["нет голоса", "нельзя озвучивать", "не умею"]):
+            reply_text = speech_prompt if speech_prompt else "Мда, заставил озвучить блин."
+
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
         processed_text = clean_text_for_telegram(reply_text)
 
@@ -353,4 +354,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-            
+    
