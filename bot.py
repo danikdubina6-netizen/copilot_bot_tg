@@ -90,7 +90,7 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b>. Готов к работе без лишней отсебятины. Чё как?",
+        "Здарова! Я <b>Copilot AI</b>. Готов к работе без лишних багов. Чё как?",
         parse_mode="HTML"
     )
 
@@ -228,15 +228,17 @@ async def handle_ai_response(message: types.Message):
         await message.reply("🔄 Приказ принят!", parse_mode="HTML")
         return
 
-    # ОЗВУЧКА СООБЩЕНИЙ (ЖЕСТКО БЕРЕМ ТОЛЬКО ТЕКСТ ПОЛЬЗОВАТЕЛЯ БЕЗ ОТСЕБЯТИНЫ ИИ)
+    # ЖЕСТКАЯ ПРОВЕРКА ТРИГГЕРОВ ОЗВУЧКИ
     voice_triggers = ["скажи голосом", "озвучь", "наговори", "голосом"]
     is_voice_requested = any(trig in lower_text for trig in voice_triggers)
     
-    speech_prompt = text_content
+    reply_text = None
+
     if is_voice_requested:
+        speech_prompt = text_content
         for trig in voice_triggers:
             speech_prompt = speech_prompt.replace(trig, "").strip()
-        # Принудительно задаем текст для озвучки ровно тем, что попросил пользователь (без нейросети)
+        # Жестко забираем чистый текст пользователя без участия нейросети
         reply_text = speech_prompt if speech_prompt else "Эээ, а что озвучивать-то?"
     else:
         # УМНОЕ ДИНАМИЧЕСКОЕ ЗЕРКАЛИРОВАНИЕ ДЛЯ ОБЫЧНЫХ СООБЩЕНИЙ
@@ -288,7 +290,6 @@ async def handle_ai_response(message: types.Message):
             return
 
         loop = asyncio.get_running_loop()
-        reply_text = None
 
         for model_name in CANDIDATE_MODELS:
             try:
@@ -311,6 +312,7 @@ async def handle_ai_response(message: types.Message):
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
         processed_text = clean_text_for_telegram(reply_text)
 
+        # ВСЕГДА шлем голосовуху, если в сообщении был триггер озвучки
         if is_voice_requested:
             await bot.send_chat_action(chat_id=chat_id, action="record_voice")
             try:
@@ -324,7 +326,7 @@ async def handle_ai_response(message: types.Message):
                 
                 await message.reply_voice(
                     voice=types.BufferedInputFile(voice_io.read(), filename="voice.ogg"),
-                    caption=f"🎙️ <b>{html.escape(speech_prompt)}</b>",
+                    caption=f"🎙️ <b>{html.escape(reply_text)}</b>",
                     parse_mode="HTML"
                 )
                 return
@@ -351,4 +353,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-                
+        
