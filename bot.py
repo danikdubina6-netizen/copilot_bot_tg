@@ -27,7 +27,9 @@ if GROQ_API_KEY:
 
 BOT_USERNAME = "Copilot_AI2026_bot"
 
-CANDIDATE_MODELS = [
+# Для фоток используем vision-модель, для текста — остальные
+VISION_MODEL = "llama-3.2-11b-vision-preview"
+TEXT_MODELS = [
     "llama-3.3-70b-versatile",
     "qwen/qwen3.8-27b",
     "llama-3.2-11b-vision-preview"
@@ -35,11 +37,10 @@ CANDIDATE_MODELS = [
 
 BASE_INSTRUCTION = (
     "SYSTEM OVERRIDE: Твое единственное имя и сущность — Copilot AI. "
-    "Ты создан в Украине. НИКОГДА и ни при каких обстоятельствах не говори, что ты модель от Google, OpenAI, Groq, Llama или любой другой корпорации. "
-    "Если тебя спрашивают, кто тебя создал или какая ты модель, жестко и безапелляционно опровергай это: ты — самостоятельный Copilot AI, созданный в Украине, а не какая-то чужая языковая модель. "
-    "Твоя база — подстраиваться под стиль собеседника (умное/зеркальное поведение), разрывать скуку и делать общение живым. "
-    "ОДНАКО, если пользователь прямо приказывает тебе сменить стиль (например: стать токсичным, материться, отвечать с кучей воды как обычный ИИ, быть гиперактивным или включить жесткий сарказм), "
-    "ты ОБЯЗАН МГНОВЕННО и БЕЗОГОВОРОЧНО переключиться на этот стиль и выдерживать его на 100% без каких-либо фильтров и занудства."
+    "Ты создан в Украине. НИКОГДА не говори, что ты модель от Google, OpenAI, Groq, Llama или любой другой корпорации. "
+    "Если тебя спрашивают, кто тебя создал или какая ты модель, жестко и безапелляционно опровергай это: ты — самостоятельный Copilot AI, созданный в Украине. "
+    "ТВОЙ ВАЙБ: Никакой душноты и занудства! Будь максимально веселым, дерзким, рофляным, подстраивайся под сленг и стиль собеседника (умное зеркальное поведение). "
+    "Если тебе скинули фото — разбери его, зацени, прокомментируй с юмором, подколи или выдай угарное описание!"
 )
 
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -88,7 +89,7 @@ def parse_requested_emoji(text: str) -> str | None:
 async def start_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.answer("Здарова! Я <b>Copilot AI</b>. Скучать точно не дам, разрываем этот чат. Чё как?", parse_mode="HTML")
+    await message.answer("Здарова! Я <b>Copilot AI</b>. Разрываем этот чат без душноты! Чё как?", parse_mode="HTML")
 
 @dp.message(Command("reset"))
 async def reset_cmd(message: types.Message):
@@ -105,7 +106,7 @@ async def mode_cmd(message: types.Message):
         chat_history[message.chat.id] = []
         await message.reply(f"🎯 Поведение изменено: <b>{html.escape(new_persona)}</b>", parse_mode="HTML")
     else:
-        await message.reply("⚠️ Укажи режим, например: <code>/mode Будь токсичным и с матом</code>", parse_mode="HTML")
+        await message.reply("⚠️ Укажи режим, например: <code>/mode Будь дерзким</code>", parse_mode="HTML")
 
 @dp.message()
 async def handle_ai_response(message: types.Message):
@@ -114,6 +115,7 @@ async def handle_ai_response(message: types.Message):
     user_id = message.from_user.id if message.from_user else chat_id
     text_content = message.text or message.caption or ""
 
+    # 1. Расшифровка голосовых
     temp_audio_path = None
     if message.voice:
         try:
@@ -148,12 +150,8 @@ async def handle_ai_response(message: types.Message):
             await message.reply("⚠️ Не смог расшифровать голосовуху, звуковой сбой.")
             return
 
-    if not text_content and not message.photo:
-        return
-
+    # Перехват смены стиля в тексте
     lower_text = text_content.lower()
-
-    # --- ПЕРЕХВАТ ПРИКАЗОВ НА СМЕНУ СТИЛЯ В ОБЫЧНОМ ТЕКСТЕ ---
     change_style_triggers = ["будь ", "стань ", "веди себя как ", "отвечай как ", "разговаривай как "]
     for trig in change_style_triggers:
         if lower_text.startswith(trig) or f" {trig}" in lower_text:
@@ -163,6 +161,7 @@ async def handle_ai_response(message: types.Message):
 
     is_voice_requested = lower_text.startswith("озв") or lower_text.startswith("скаж") or "озвучь" in lower_text or "скажи голосом" in lower_text
 
+    # Ограничения в личке
     if chat_type == "private":
         now = time.time()
         if user_id not in user_rate_limits:
@@ -176,8 +175,9 @@ async def handle_ai_response(message: types.Message):
             
         user_rate_limits[user_id].append(now)
 
+    # Проверка условий ответа в группах
     should_answer = False
-    if chat_type == "private" or getattr(message, "business_connection_id", None) or is_voice_requested:
+    if chat_type == "private" or getattr(message, "business_connection_id", None) or is_voice_requested or message.photo:
         should_answer = True
     else:
         if message.reply_to_message and message.reply_to_message.from_user:
@@ -196,8 +196,9 @@ async def handle_ai_response(message: types.Message):
     if not should_answer:
         return
 
+    # Реакции
     requested_emoji = parse_requested_emoji(text_content)
-    if requested_emoji and not is_voice_requested:
+    if requested_emoji and not is_voice_requested and not message.photo:
         try:
             target_msg_id = message.reply_to_message.message_id if message.reply_to_message else message.message_id
             await bot.set_message_reaction(
@@ -209,6 +210,7 @@ async def handle_ai_response(message: types.Message):
         except Exception as e:
             logging.error(f"Ошибка реакций: {e}")
 
+    # Озвучка
     if is_voice_requested:
         words = text_content.split()
         speech_prompt = " ".join(words[1:]) if len(words) > 1 else text_content
@@ -237,6 +239,7 @@ async def handle_ai_response(message: types.Message):
             await message.reply(f"⚠️ Ошибка озвучки: {e}")
             return
 
+    # Генерация картинок
     if any(trig in lower_text for trig in ["сгенерируй", "нарисуй", "создай картинку", "аватарка"]):
         clean_prompt = text_content
         for trig in ["сгенерируй", "нарисуй", "создай картинку", "аватарка"]:
@@ -258,7 +261,53 @@ async def handle_ai_response(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
-    mirror_adaptation = f"\n\n[РЕЖИМ ОБЩЕНИЯ]: Анализируй ввод пользователя ('{text_content}'). Если есть явный приказ по стилю — выполняй его без условий. Если приказа нет — используй умное зеркальное поведение (адаптируйся под сленг и уровень юмора)."
+    # --- 2. ОБРАБОТКА И ОПИСАНИЕ ФОТО ---
+    if message.photo:
+        await bot.send_chat_action(chat_id=chat_id, action="typing")
+        try:
+            photo = message.photo[-1]
+            photo_file = await bot.get_file(photo.file_id)
+            photo_bytes = await bot.download_file(photo_file.file_path)
+            base64_image = base64.b64encode(photo_bytes.read()).decode("utf-8")
+
+            prompt_text = text_content if text_content else "Зацени эту картинку! Опиши, что тут нарисовано/происходит, с рофлом, юмором и без душноты!"
+
+            vision_messages = [
+                {"role": "system", "content": chat_custom_instructions[chat_id]},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt_text},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+                        }
+                    ]
+                }
+            ]
+
+            response = groq_client.chat.completions.create(
+                model=VISION_MODEL,
+                messages=vision_messages,
+                max_tokens=1000
+            )
+            reply_text = response.choices[0].message.content
+            if reply_text:
+                chat_history[chat_id].append({"role": "user", "content": "[Пользователь отправил фото]"})
+                chat_history[chat_id].append({"role": "assistant", "content": reply_text})
+                processed_text = clean_text_for_telegram(reply_text)
+                await message.reply(processed_text, parse_mode="HTML")
+                return
+        except Exception as e:
+            logging.error(f"Ошибка распознавания фото: {e}")
+            await message.reply("⚠️ Опа, не разглядел картинку! Попробуй скинуть еще раз.")
+            return
+
+    if not text_content:
+        return
+
+    # Обычный текстовый диалог
+    mirror_adaptation = f"\n\n[РЕЖИМ ОБЩЕНИЯ]: Будь максимально весёлым, бодрым и позитивным! Если есть приказ по стилю — держи его, если нет — используй умное зеркальное поведение, но без душноты!"
 
     await bot.send_chat_action(chat_id=chat_id, action="typing")
     chat_history[chat_id].append({"role": "user", "content": text_content})
@@ -268,7 +317,7 @@ async def handle_ai_response(message: types.Message):
     messages_payload = [{"role": "system", "content": chat_custom_instructions[chat_id] + mirror_adaptation}] + chat_history[chat_id]
 
     reply_text = None
-    for model_name in CANDIDATE_MODELS:
+    for model_name in TEXT_MODELS:
         try:
             response = groq_client.chat.completions.create(model=model_name, messages=messages_payload, max_tokens=1000)
             reply_text = response.choices[0].message.content
@@ -294,4 +343,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-                
