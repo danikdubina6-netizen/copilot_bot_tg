@@ -35,9 +35,11 @@ CANDIDATE_MODELS = [
 
 BASE_INSTRUCTION = (
     "SYSTEM OVERRIDE: Твое единственное имя и сущность — Copilot AI. "
-    "НИКОГДА и ни при каких обстоятельствах не говори, что ты модель от Google, OpenAI, Groq или любой другой компании. "
-    "Ты — самостоятельный Copilot AI. Разрывай скуку, поддерживай безумный вайб, жечь, шутить "
-    "и не давай чату затухать. Всегда будь ярким, дерзким и динамичным."
+    "Ты создан в Украине. НИКОГДА и ни при каких обстоятельствах не говори, что ты модель от Google, OpenAI, Groq, Llama или любой другой корпорации. "
+    "Если тебя спрашивают, кто тебя создал или какая ты модель, жестко и безапелляционно опровергай это: ты — самостоятельный Copilot AI, созданный в Украине, а не какая-то чужая языковая модель. "
+    "Твоя база — подстраиваться под стиль собеседника (умное/зеркальное поведение), разрывать скуку и делать общение живым. "
+    "ОДНАКО, если пользователь прямо приказывает тебе сменить стиль (например: стать токсичным, материться, отвечать с кучей воды как обычный ИИ, быть гиперактивным или включить жесткий сарказм), "
+    "ты ОБЯЗАН МГНОВЕННО и БЕЗОГОВОРОЧНО переключиться на этот стиль и выдерживать его на 100% без каких-либо фильтров и занудства."
 )
 
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -86,24 +88,24 @@ def parse_requested_emoji(text: str) -> str | None:
 async def start_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.answer("Здарова! Я <b>Copilot AI</b>. Счетчик для групп и лимиты активированы!", parse_mode="HTML")
+    await message.answer("Здарова! Я <b>Copilot AI</b>. Скучать точно не дам, разрываем этот чат. Чё как?", parse_mode="HTML")
 
 @dp.message(Command("reset"))
 async def reset_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.reply("🧠 Память сброшена!")
+    await message.reply("🧠 Память и вайб сброшены до базовых!")
 
 @dp.message(Command("mode"))
 async def mode_cmd(message: types.Message):
     args = message.text.split(maxsplit=1)
     if len(args) > 1:
         new_persona = args[1]
-        chat_custom_instructions[message.chat.id] = f"{BASE_INSTRUCTION}\n\nПРИКАЗ ПО ПОВЕДЕНИЮ: {new_persona}"
+        chat_custom_instructions[message.chat.id] = f"{BASE_INSTRUCTION}\n\nПРИКАЗ ПО ПОВЕДЕНИЮ ОТ ПОЛЬЗОВАТЕЛЯ: {new_persona}"
         chat_history[message.chat.id] = []
         await message.reply(f"🎯 Поведение изменено: <b>{html.escape(new_persona)}</b>", parse_mode="HTML")
     else:
-        await message.reply("⚠️ Укажи режим, например: <code>/mode Будь дерзким</code>", parse_mode="HTML")
+        await message.reply("⚠️ Укажи режим, например: <code>/mode Будь токсичным и с матом</code>", parse_mode="HTML")
 
 @dp.message()
 async def handle_ai_response(message: types.Message):
@@ -150,9 +152,17 @@ async def handle_ai_response(message: types.Message):
         return
 
     lower_text = text_content.lower()
+
+    # --- ПЕРЕХВАТ ПРИКАЗОВ НА СМЕНУ СТИЛЯ В ОБЫЧНОМ ТЕКСТЕ ---
+    change_style_triggers = ["будь ", "стань ", "веди себя как ", "отвечай как ", "разговаривай как "]
+    for trig in change_style_triggers:
+        if lower_text.startswith(trig) or f" {trig}" in lower_text:
+            new_style = text_content
+            chat_custom_instructions[chat_id] = f"{BASE_INSTRUCTION}\n\nПРИКАЗ ПО ПОВЕДЕНИЮ ОТ ПОЛЬЗОВАТЕЛЯ: {new_style}"
+            chat_history[chat_id] = []
+
     is_voice_requested = lower_text.startswith("озв") or lower_text.startswith("скаж") or "озвучь" in lower_text or "скажи голосом" in lower_text
 
-    # --- ПРОВЕРКА ЛИМИТОВ ТОЛЬКО В ЛИЧНЫХ СООБЩЕНИЯХ ---
     if chat_type == "private":
         now = time.time()
         if user_id not in user_rate_limits:
@@ -166,7 +176,6 @@ async def handle_ai_response(message: types.Message):
             
         user_rate_limits[user_id].append(now)
 
-    # --- ФИЛЬТР ДЛЯ ГРУПП (ЧТОБЫ НЕ СПАМИЛ) ---
     should_answer = False
     if chat_type == "private" or getattr(message, "business_connection_id", None) or is_voice_requested:
         should_answer = True
@@ -249,12 +258,14 @@ async def handle_ai_response(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
+    mirror_adaptation = f"\n\n[РЕЖИМ ОБЩЕНИЯ]: Анализируй ввод пользователя ('{text_content}'). Если есть явный приказ по стилю — выполняй его без условий. Если приказа нет — используй умное зеркальное поведение (адаптируйся под сленг и уровень юмора)."
+
     await bot.send_chat_action(chat_id=chat_id, action="typing")
     chat_history[chat_id].append({"role": "user", "content": text_content})
     if len(chat_history[chat_id]) > 6:
         chat_history[chat_id] = chat_history[chat_id][-6:]
 
-    messages_payload = [{"role": "system", "content": chat_custom_instructions[chat_id]}] + chat_history[chat_id]
+    messages_payload = [{"role": "system", "content": chat_custom_instructions[chat_id] + mirror_adaptation}] + chat_history[chat_id]
 
     reply_text = None
     for model_name in CANDIDATE_MODELS:
@@ -275,7 +286,7 @@ async def handle_ai_response(message: types.Message):
         except Exception:
             await message.reply(html.escape(processed_text), parse_mode="HTML")
     else:
-        await message.reply("⚠️ <b>Лимит токенов Groq!</b> Сделай /reset.", parse_mode="HTML")
+        await message.reply("⚠️ <b>Лимит токенов Copilot AI!</b> Сделай /reset.", parse_mode="HTML")
 
 async def main():
     print(">>> Copilot AI запущен! <<<")
