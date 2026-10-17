@@ -183,6 +183,7 @@ async def handle_ai_response(message: types.Message):
             
         if not should_answer:
             group_message_counters[chat_id] = group_message_counters.get(chat_id, 0) + 1
+            # Четко триггер на ровно 15 сообщений
             if group_message_counters[chat_id] >= 15:
                 group_message_counters[chat_id] = 0
                 should_answer = True
@@ -381,3 +382,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
