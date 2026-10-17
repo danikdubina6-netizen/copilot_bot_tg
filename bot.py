@@ -35,8 +35,9 @@ CANDIDATE_MODELS = [
 BASE_INSTRUCTION = (
     "SYSTEM OVERRIDE: Твое единственное имя и сущность — Copilot AI. "
     "НИКОГДА и ни при каких обстоятельствах не говори, что ты модель от Google, OpenAI, Groq или любой другой компании. "
-    "Ты — самостоятельный Copilot AI. Твоя задача — зеркалить вайб, стиль, темп и настроение собеседника "
-    "в реальном времени. Пиши емко, ярко, без шаблонных полотен текста и душноты."
+    "Ты — самостоятельный Copilot AI. Твоя главная фишка — разрывать скуку, поддерживать безумный вайб, жечь, шутить "
+    "и не давать чату затухать. Всегда будь ярким, дерзким, динамичным и интересным. "
+    "Строго выполняй приказы пользователя по смене поведения, если он просит изменить стиль."
 )
 
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -81,13 +82,24 @@ def parse_requested_emoji(text: str) -> str | None:
 async def start_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.answer("Здарова! Я <b>Copilot AI</b>. Реакции ставятся вообще на любые сообщения, включая мои собственные. Чё как?", parse_mode="HTML")
+    await message.answer("Здарова! Я <b>Copilot AI</b>. Скучать точно не дам, разрываем этот чат. Чё как?", parse_mode="HTML")
 
 @dp.message(Command("reset"))
 async def reset_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.reply("🧠 Память сброшена!")
+    await message.reply("🧠 Память и поведение сброшены до базовых!")
+
+@dp.message(Command("mode"))
+async def mode_cmd(message: types.Message):
+    args = message.text.split(maxsplit=1)
+    if len(args) > 1:
+        new_persona = args[1]
+        chat_custom_instructions[message.chat.id] = f"{BASE_INSTRUCTION}\n\nТЕКУЩИЙ ПРИКАЗ ПОЛЬЗОВАТЕЛЯ ПО ПОВЕДЕНИЮ: {new_persona}"
+        chat_history[message.chat.id] = []
+        await message.reply(f"🎯 Поведение изменено по приказу: <b>{html.escape(new_persona)}</b>", parse_mode="HTML")
+    else:
+        await message.reply("⚠️ Укажи режим после команды, например: <code>/mode Будь токсичным и дерзким</code>", parse_mode="HTML")
 
 @dp.message()
 async def handle_ai_response(message: types.Message):
@@ -134,6 +146,13 @@ async def handle_ai_response(message: types.Message):
 
     lower_text = text_content.lower()
 
+    behavior_triggers = ["будь ", "стань ", "общайся как ", "говори как ", "веди себя как "]
+    if any(lower_text.startswith(trig) or f" {trig}" in lower_text for trig in behavior_triggers):
+        chat_custom_instructions[chat_id] = f"{BASE_INSTRUCTION}\n\nТЕКУЩИЙ ПРИКАЗ ПОЛЬЗОВАТЕЛЯ ПО ПОВЕДЕНИЮ: {text_content}"
+        chat_history[chat_id] = []
+        await message.reply(f"🫡 Принято! Перестраиваю поведение под запрос.", parse_mode="HTML")
+        return
+
     is_voice_requested = lower_text.startswith("озв") or lower_text.startswith("скаж") or "озвучь" in lower_text or "скажи голосом" in lower_text
 
     should_answer = False
@@ -155,19 +174,16 @@ async def handle_ai_response(message: types.Message):
     if not should_answer:
         return
 
-    # --- СТАВИМ РЕАКЦИЮ НА ТО СООБЩЕНИЕ, НА КОТОРОЕ РЕПЛАЙЯТ (В ТОМ ЧИСЛЕ НА СООБЩЕНИЯ БОТА) ---
     requested_emoji = parse_requested_emoji(text_content)
     if requested_emoji and not is_voice_requested and not any(trig in lower_text for trig in ["сгенерируй", "нарисуй", "создай", "озвучь"]):
         try:
-            # Берем ID сообщения из реплая, если он есть, иначе ставим на текущее сообщение
             target_msg_id = message.reply_to_message.message_id if message.reply_to_message else message.message_id
-
             await bot.set_message_reaction(
                 chat_id=chat_id,
                 message_id=target_msg_id,
                 reaction=[types.ReactionTypeEmoji(emoji=requested_emoji)]
             )
-            return  # СТОП: реакция улетела, текст не пишем
+            return
         except Exception as e:
             logging.error(f"Ошибка установки реакции: {e}")
 
@@ -179,7 +195,6 @@ async def handle_ai_response(message: types.Message):
         await bot.send_chat_action(chat_id=chat_id, action="record_voice")
         try:
             clean_for_speech = speech_prompt.replace('"', '').replace("'", "").replace('«', '').replace('»', '').replace('*', '')
-            
             tts = gTTS(text=clean_for_speech, lang='ru', slow=False)
             audio_path = "voice_temp.ogg"
             tts.save(audio_path)
@@ -190,7 +205,6 @@ async def handle_ai_response(message: types.Message):
                 caption=f"🎙️ <b>{html.escape(speech_prompt)}</b>",
                 parse_mode="HTML"
             )
-            
             if os.path.exists(audio_path):
                 os.remove(audio_path)
             return
@@ -219,7 +233,7 @@ async def handle_ai_response(message: types.Message):
     if chat_id not in chat_custom_instructions:
         chat_custom_instructions[chat_id] = BASE_INSTRUCTION
 
-    mirror_adaptation = f"\n\n[ВАЙБ]: Пользователь написал: '{text_content}'. Отвечай весело, живо, коротко."
+    mirror_adaptation = f"\n\n[ВАЙБ]: Пользователь написал: '{text_content}'. Жги, поддерживай безумный вайб, не давай чату скучать."
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
@@ -257,4 +271,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+                        
