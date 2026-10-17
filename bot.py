@@ -46,10 +46,9 @@ dp = Dispatcher()
 chat_history = {}
 chat_custom_instructions = {}
 
-# Словарь для отслеживания лимитов в личке: {user_id: [timestamps]}
 user_rate_limits = {}
-RATE_LIMIT_COUNT = 6   # Максимум сообщений
-RATE_LIMIT_PERIOD = 10 # За сколько секунд
+RATE_LIMIT_COUNT = 6
+RATE_LIMIT_PERIOD = 10
 
 def clean_text_for_telegram(text: str) -> str:
     text = text.replace("&nbsp;", " ")
@@ -59,7 +58,7 @@ def clean_text_for_telegram(text: str) -> str:
         return f"<pre><code>{escaped_content}</code></pre>"
         
     text = re.sub(r'```([a-zA-Z]*)\n?(.*?)```', code_block_replacer, text, flags=re.DOTALL)
-    text = re.sub(r'`([^`]+?)`', lambda m: `<code>{html.escape(m.group(1))}</code>`, text)
+    text = re.sub(r'`([^`]+?)`', lambda m: "<code>" + html.escape(m.group(1)) + "</code>", text)
     text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'(?<!\s)\*(?!\s)(.*?)(?<!\s)\*(?!\w)', r'<i>\1</i>', text)
     return text
@@ -86,7 +85,7 @@ def parse_requested_emoji(text: str) -> str | None:
 async def start_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.answer("Здарова! Я <b>Copilot AI</b>. Лимиты в личке активированы, в группах — полный свободохайп. Чё как?", parse_mode="HTML")
+    await message.answer("Здарова! Я <b>Copilot AI</b>. Ошибки устранены, летим дальше!", parse_mode="HTML")
 
 @dp.message(Command("reset"))
 async def reset_cmd(message: types.Message):
@@ -115,13 +114,11 @@ async def handle_ai_response(message: types.Message):
     if not text_content and not message.photo and not message.voice:
         return
 
-    # --- ПРОВЕРКА ЛИМИТОВ ТОЛЬКО В ЛИЧНЫХ СООБЩЕНИЯХ ---
     if chat_type == "private":
         now = time.time()
         if user_id not in user_rate_limits:
             user_rate_limits[user_id] = []
         
-        # Очищаем старые тайстампы
         user_rate_limits[user_id] = [t for t in user_rate_limits[user_id] if now - t < RATE_LIMIT_PERIOD]
         
         if len(user_rate_limits[user_id]) >= RATE_LIMIT_COUNT:
@@ -130,7 +127,6 @@ async def handle_ai_response(message: types.Message):
             
         user_rate_limits[user_id].append(now)
 
-    # Обработка реакций
     requested_emoji = parse_requested_emoji(text_content)
     if requested_emoji:
         try:
@@ -144,7 +140,6 @@ async def handle_ai_response(message: types.Message):
         except Exception as e:
             logging.error(f"Ошибка реакций: {e}")
 
-    # Генерация картинок
     lower_text = text_content.lower()
     if any(trig in lower_text for trig in ["сгенерируй", "нарисуй", "создай картинку", "аватарка"]):
         clean_prompt = text_content
@@ -201,4 +196,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+        
