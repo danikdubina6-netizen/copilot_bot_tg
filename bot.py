@@ -58,24 +58,28 @@ def clean_text_for_telegram(text: str) -> str:
     return text
 
 def parse_requested_emoji(text: str) -> str | None:
-    supported_emojis = ["👍", "🔥", "❤️", "❤", "😍", "🗿", "😂", "💩", "🤮", "🎉", "👏", "⚡️", "🧠", "💻", "👎", "🤣"]
+    supported_emojis = ["👍", "🔥", "❤️", "❤", "😍", "🗿", "😂", "💩", "🤮", "🎉", "👏", "⚡️", "🧠", "💻", "👎", "🤣", "☝️", "☝", "💢"]
     for char in text:
         if char in supported_emojis:
-            return "❤️" if char == "❤" else char
+            return "❤️" if char == "❤" else ("☝️" if char == "☝" else char)
+            
     lower = text.lower()
-    if "лайк" in lower: return "👍"
-    if "огонь" in lower: return "🔥"
-    if "сердце" in lower: return "❤️"
+    if "палец вверх" in lower or "лайк" in lower: return "👍"
+    if "палец вниз" in lower or "дизлайк" in lower: return "👎"
+    if "вверх" in lower or "указательный" in lower or "палец" in lower or "☝" in lower: return "☝️"
+    if "огонь" in lower or "пожар" in lower: return "🔥"
+    if "сердце" in lower or "любовь" in lower: return "❤️"
     if "смешно" in lower or "кек" in lower or "ржака" in lower or "🤣" in lower or "😂" in lower: return "😂"
     if "моаи" in lower or "камень" in lower: return "🗿"
     if "топ" in lower or "ракета" in lower: return "⚡️"
+    if "гнев" in lower or "злой" in lower or "💢" in lower: return "💢"
     return None
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.answer("Здарова! Я <b>Copilot AI</b>. Ошибку фиксанули, летим дальше. Чё как?", parse_mode="HTML")
+    await message.answer("Здарова! Я <b>Copilot AI</b>. Реакции теперь слушаюсь беспрекословно. Чё как?", parse_mode="HTML")
 
 @dp.message(Command("reset"))
 async def reset_cmd(message: types.Message):
@@ -149,9 +153,11 @@ async def handle_ai_response(message: types.Message):
     if not should_answer:
         return
 
+    # Ставим реакцию (теперь точно поймет палец вверх/вниз и указательный палец)
     try:
         chosen_emoji = parse_requested_emoji(text_content) or ("🔥" if (message.photo or message.voice) else random.choice(["👍", "🔥", "⚡️", "❤️", "🗿", "😂"]))
-        await bot.set_message_reaction(chat_id=chat_id, message_id=message.message_id, reaction=[types.ReactionTypeEmoji(emoji=chosen_emoji)])
+        target_msg_id = message.reply_to_message.message_id if message.reply_to_message else message.message_id
+        await bot.set_message_reaction(chat_id=chat_id, message_id=target_msg_id, reaction=[types.ReactionTypeEmoji(emoji=chosen_emoji)])
     except Exception as e:
         logging.error(f"Ошибка реакций: {e}")
 
