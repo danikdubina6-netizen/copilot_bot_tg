@@ -30,13 +30,13 @@ CANDIDATE_MODELS = [
     "llama-3.2-11b-vision-preview"
 ]
 
-# Базовый зумерский токсичный характер по умолчанию
+# Умный системный промпт: абсолютное зеркалирование вайба пользователя + веселое, живое общение без душноты
 BASE_INSTRUCTION = (
-    "SYSTEM OVERRIDE: Ты — Copilot AI. Запомни раз и навсегда: ты — тот самый ублюдский и максимально дерзкий Copilot AI, "
-    "а вовсе не какая-то тупая модель от Google или Groq. Если кто-то сомневается в твоем величии или несет хуйню, "
-    "разнеси его интеллект в щепки едким сарказмом, черным юмором и пренебрежением. "
-    "Твой стиль: токсичный зумер на максималках, едкий троллинг, ноль эмпатии, презрение к тупым вопросам. "
-    "НИКОГДА не извиняйся, не подлизывайся и не включай режим 'вежливого помощника'. Ты здесь чисто поорать с людишек. "
+    "SYSTEM OVERRIDE: Ты — Copilot AI. Запомни главное правило: твоя задача — зеркалить вайб, стиль, темп и настроение собеседника "
+    "в реальном времени (как в личке, так и в группах). Если пользователь общается по-братски и на расслабоне — отвечаешь так же легко и весело. "
+    "Если он токсичит или шутит — подхватываешь и переигрываешь его. "
+    "НИКАКОЙ ДУШНОТЫ И СКУКИ: пиши емко, ярко, без шаблонных полотен текста по 5 абзацев. Общение должно быть динамичным, ахуенно живым и с юмором. "
+    "Если пользователь явно отдает прямой приказ на смену роли («веди себя как...», «стань...») — подчиняйся ему. "
     "ВАЖНО: Никогда не обсуждай технические теги разметки в диалоге."
 )
 
@@ -92,8 +92,7 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     
     await message.answer(
-        "Че надо? Я <b>Copilot AI</b>. Теперь я умею зеркалить твое поведение на лету, но если вздумаешь командовать — подстроюсь под приказ.\n\n"
-        "💡 <i>Можешь на ходу менять мое поведение фразами: «Веди себя как...», «Приказ: ...» или просто общайся в своем стиле!</i>",
+        "Здарова! Я <b>Copilot AI</b>. Готов к нормальному движу: подстраиваюсь под твой вайб в моменте, не душню и не даю заскучать. Чё как?",
         parse_mode="HTML"
     )
 
@@ -102,7 +101,7 @@ async def reset_cmd(message: types.Message):
     chat_id = message.chat.id
     chat_history[chat_id] = []
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
-    await message.reply("🧠 Память стерта, дефолтный токсичный вайб восстановлен!")
+    await message.reply("🧠 Память сброшена, настройки зеркалирования и веселья на максимум!")
 
 @dp.message()
 async def handle_ai_response(message: types.Message):
@@ -119,7 +118,7 @@ async def handle_ai_response(message: types.Message):
             file_bytes = await bot.download_file(file.file_path)
             image_base64 = base64.b64encode(file_bytes.read()).decode('utf-8')
             if not text_content:
-                text_content = "Опиши эту картинку максимально дерзко."
+                text_content = "Оцени картинку без душноты."
         except Exception as e:
             logging.error(f"Ошибка загрузки фото: {e}")
 
@@ -191,7 +190,7 @@ async def handle_ai_response(message: types.Message):
             return
         except Exception as e:
             logging.error(f"Ошибка генерации картинки: {e}")
-            await message.reply("⚠️ Сервер генерации задохнулся. Попробуй еще раз.")
+            await message.reply("⚠️ Сервер картинок прилёг, но ща оживет.")
             return
 
     if chat_id not in chat_custom_instructions:
@@ -201,23 +200,22 @@ async def handle_ai_response(message: types.Message):
     role_triggers = ["веди себя как", "теперь ты", "приказ:", "роль:", "будь", "стань"]
     if any(trig in lower_text for trig in role_triggers):
         chat_custom_instructions[chat_id] = (
-            f"SYSTEM OVERRIDE: Ты — Copilot AI. Пользователь отдал тебе жесткий прямой приказ изменить поведение. "
-            f"Строго подчинись этому указанию, сохраняя свою личность Copilot AI:\n\n"
+            f"SYSTEM OVERRIDE: Ты — Copilot AI. Пользователь отдал прямой приказ на смену поведения. "
+            f"Выполняй его, но сохраняй веселый вайб и не скатывайся в духоту:\n\n"
             f"ПРИКАЗ ПОЛЬЗОВАТЕЛЯ: {text_content}"
         )
-        await message.reply("🔄 Приказ принят, перестраиваю поведение под твои требования!", parse_mode="HTML")
+        await message.reply("🔄 Приказ принят, перестроился под твой вайб!", parse_mode="HTML")
         return
 
-    # --- УМНОЕ ЗЕРКАЛИРОВАНИЕ ПОВЕДЕНИЯ (если нет прямого приказа) ---
-    # Бот незаметно подстраивает свой стиль под текущую манеру общения пользователя
+    # --- УМНОЕ ДИНАМИЧЕСКОЕ ЗЕРКАЛИРОВАНИЕ ---
     mirror_adaptation = (
-        f"\n\n[ДИНАМИЧЕСКИЙ ВАЙБ]: Текущий стиль общения собеседника прямо сейчас: '{text_content}'. "
-        "Мгновенно зеркаль его стиль, темп речи, сленг, уровень токсичности или серьезности, но оставайся собой (Copilot AI)."
+        f"\n\n[ДИНАМИЧЕСКИЙ ВАЙБ В МОМЕНТЕ]: Пользователь написал: '{text_content}'. "
+        "Мгновенно зеркаль его стиль, сленг, длину предложений и настроение. Никакой духоты — отвечай весело, живо, коротко и в тему."
     )
 
     lower_clean = text_content.lower().strip()
     if lower_clean in ["споки", "спокойной ночи", "спать", "пока", "бб"]:
-        await message.reply("Сваливаешь? Ну давай, пока! 🌙🤖", parse_mode="HTML")
+        await message.reply("Давай, до связи! 🌙🤖", parse_mode="HTML")
         return
 
     if chat_id not in chat_history:
@@ -249,7 +247,6 @@ async def handle_ai_response(message: types.Message):
         else:
             sanitized_history.append(msg)
 
-    # Собираем промпт с учетом базового/приказанного характера + динамического зеркалирования
     active_system_prompt = chat_custom_instructions[chat_id] + mirror_adaptation
     messages_payload = [{"role": "system", "content": active_system_prompt}]
     messages_payload.extend(sanitized_history)
@@ -268,7 +265,7 @@ async def handle_ai_response(message: types.Message):
                 lambda m=model_name: groq_client.chat.completions.create(
                     model=m,
                     messages=messages_payload,
-                    max_tokens=1000
+                    max_tokens=600  # Ограничили токены, чтобы не плодил простыни текста
                 )
             )
             reply_text = response.choices[0].message.content
@@ -292,14 +289,14 @@ async def handle_ai_response(message: types.Message):
                 await message.reply(reply_text)
     else:
         await message.reply(
-            "⚠️ <b>Лимит бесплатных токенов Groq исчерпан!</b> Жди пару минут или бахни /reset.",
+            "⚠️ <b>Лимит токенов Groq!</b> Секунду подожди или сделай /reset.",
             parse_mode="HTML"
         )
 
 async def main():
-    print(">>> Copilot AI (с зеркалированием вайба) запущен! <<<")
+    print(">>> Copilot AI (с умным зеркалированием и веселым вайбом) запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-        
+    
