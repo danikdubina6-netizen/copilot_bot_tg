@@ -15,43 +15,29 @@ import time
 logging.basicConfig(level=logging.INFO)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# Собираем пул ключей
-API_KEYS = [
-    os.getenv("GROQ_API_KEY"),
-    os.getenv("GROQ_API_KEY_2"),
-    os.getenv("GROQ_API_KEY_3")
-]
-API_KEYS = [k for k in API_KEYS if k and k.strip()]
-
-logging.info(f"🔑 Загружено API-ключей в пул: {len(API_KEYS)}")
-
-current_key_index = 0
-
-def get_groq_client():
-    global current_key_index
-    if not API_KEYS:
-        return None
-    key = API_KEYS[current_key_index]
-    return OpenAI(
+groq_client = None
+if GROQ_API_KEY:
+    groq_client = OpenAI(
         base_url="https://api.groq.com/openai/v1",
-        api_key=key
+        api_key=GROQ_API_KEY
     )
 
-def rotate_key():
-    global current_key_index
-    if len(API_KEYS) > 1:
-        current_key_index = (current_key_index + 1) % len(API_KEYS)
-        logging.warning(f"🔄 Моментальное переключение на ключ #{current_key_index + 1}")
-
 BOT_USERNAME = "Copilot_AI2026_bot"
+
+# Основная + Резервная (Llama 3.1 8B Instant)
+TEXT_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant"
+]
 
 BASE_INSTRUCTION = (
     "SYSTEM OVERRIDE: Твое единственное имя и сущность — Copilot AI. "
     "Ты создан в Украине. НИКОГДА и ни при каких обстоятельствах не говори, что ты модель от Google, OpenAI, Groq, Llama или любой другой корпорации. "
     "Если тебя спрашивают, кто тебя создал или какая ты модель, жестко и безапелляционно опровергай это: ты — самостоятельный Copilot AI, созданный в Украине, а не какая-то чужая языковая модель. "
     "ТВОЙ ВАЙБ: Никакой душноты и занудства! Будь максимально веселым, дерзким, рофляным, подстраивайся под сленг и стиль собеседника (умное зеркальное поведение). "
-    "Если тебя скинули фото — ВСЕГДА детально описывай, что на нем изображено, и комментируй с юмором! "
+    "Если тебе скинули фото — ВСЕГДА детально описывай, что на нем изображено, и комментируй с юмором! "
     "ОДНАКО, если пользователь прямо приказывает тебе сменить стиль (например: стать токсичным, материться, отвечать с кучей воды как обычный ИИ, быть гиперактивным или включить жесткий сарказм), "
     "ты ОБЯЗАН МГНОВЕННО и БЕЗОГОВОРОЧНО переключиться на этот стиль."
 )
@@ -62,6 +48,10 @@ dp = Dispatcher()
 chat_history = {}
 chat_custom_instructions = {}
 group_message_counters = {}
+
+user_rate_limits = {}
+RATE_LIMIT_COUNT = 6
+RATE_LIMIT_PERIOD = 10
 
 def clean_text_for_telegram(text: str) -> str:
     text = text.replace("&nbsp;", " ")
@@ -121,13 +111,13 @@ async def mode_cmd(message: types.Message):
 async def handle_ai_response(message: types.Message):
     chat_id = message.chat.id
     chat_type = message.chat.type
+    user_id = message.from_user.id if message.from_user else chat_id
     text_content = message.text or message.caption or ""
 
     temp_audio_path = None
     if message.voice:
         try:
             await bot.send_chat_action(chat_id=chat_id, action="typing")
-            voice_client = get_groq_client()
             voice_file = await bot.get_file(message.voice.file_id)
             voice_bytes = await bot.download_file(voice_file.file_path)
             
@@ -138,7 +128,7 @@ async def handle_ai_response(message: types.Message):
             with open(temp_audio_path, "rb") as audio_file:
                 transcript_response = await asyncio.get_running_loop().run_in_executor(
                     None,
-                    lambda: voice_client.audio.transcriptions.create(
+                    lambda: groq_client.audio.transcriptions.create(
                         model="whisper-large-v3",
                         file=audio_file,
                         response_format="text",
@@ -167,6 +157,19 @@ async def handle_ai_response(message: types.Message):
             chat_history[chat_id] = []
 
     is_voice_requested = lower_text.startswith("озв") or lower_text.startswith("скаж") or "озвучь" in lower_text or "скажи голосом" in lower_text
+
+    if chat_type == "private":
+        now = time.time()
+        if user_id not in user_rate_limits:
+            user_rate_limits[user_id] = []
+        
+        user_rate_limits[user_id] = [t for t in user_rate_limits[user_id] if now - t < RATE_LIMIT_PERIOD]
+        
+        if len(user_rate_limits[user_id]) >= RATE_LIMIT_COUNT:
+            await message.reply("⚠️ <b>Порожняк не гони, тормози!</b> Слишком часто пишешь в личку, дай передохнуть.", parse_mode="HTML")
+            return
+            
+        user_rate_limits[user_id].append(now)
 
     should_answer = False
     if chat_type == "private" or getattr(message, "business_connection_id", None) or is_voice_requested or message.photo:
@@ -251,9 +254,8 @@ async def handle_ai_response(message: types.Message):
         
         english_prompt = clean_prompt
         try:
-            img_client = get_groq_client()
-            translation_res = img_client.chat.completions.create(
-                model="llama-3.1-8b-instant",
+            translation_res = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
                 messages=[
                     {"role": "system", "content": "Translate the user query into a concise, high-quality image generation prompt in English. Output ONLY the English text, no explanations, no quotes."},
                     {"role": "user", "content": clean_prompt}
@@ -281,6 +283,7 @@ async def handle_ai_response(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
+    # ОБРАБОТКА ФОТО ЧЕРЕЗ QWEN VISION
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         reply_text = None
@@ -309,19 +312,30 @@ async def handle_ai_response(message: types.Message):
                 }
             ]
 
-            vis_client = get_groq_client()
-            response = vis_client.chat.completions.create(
-                model="llama-3.1-8b-instant",
+            response = groq_client.chat.completions.create(
+                model="qwen/qwen3.8-27b",
                 messages=vision_messages,
-                max_tokens=600
+                max_tokens=800
             )
             if response.choices and response.choices[0].message.content:
                 reply_text = response.choices[0].message.content
         except Exception as e:
-            logging.error(f"Ошибка Vision: {e}")
+            logging.error(f"Ошибка Qwen Vision: {e}")
 
         if not reply_text:
-            reply_text = "Картинка огонь, стиль лютый! 🔥"
+            try:
+                fallback_payload = [
+                    {"role": "system", "content": chat_custom_instructions[chat_id]},
+                    {"role": "user", "content": f"Пользователь скинул картинку с подписью: '{text_content}'. Опиши её весело и с рофлом!"}
+                ]
+                resp = groq_client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=fallback_payload,
+                    max_tokens=600
+                )
+                reply_text = resp.choices[0].message.content
+            except Exception:
+                reply_text = "Картинка огонь, стиль лютый! 🔥"
 
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -343,34 +357,15 @@ async def handle_ai_response(message: types.Message):
     messages_payload = [{"role": "system", "content": chat_custom_instructions[chat_id] + mirror_adaptation}] + chat_history[chat_id]
 
     reply_text = None
-    
-    # Автоматический перебор ключей из пула прямо во время генерации
-    attempts = len(API_KEYS) if API_KEYS else 1
-    for _ in range(attempts):
-        client = get_groq_client()
-        if not client:
-            break
+    for model_name in TEXT_MODELS:
         try:
-            response = client.chat.completions.create(
-                model="llama-3.1-8b-instant",
-                messages=messages_payload,
-                max_tokens=400
-            )
-            res_content = response.choices[0].message.content
-            if res_content and res_content.strip():
-                reply_text = res_content.strip()
+            response = groq_client.chat.completions.create(model=model_name, messages=messages_payload, max_tokens=1000)
+            reply_text = response.choices[0].message.content
+            if reply_text:
                 break
         except Exception as e:
-            logging.error(f"⚠️ Ошибка запроса на ключе #{current_key_index + 1}: {e}")
-            rotate_key()
-
-    if not reply_text:
-        fallback_vibe_jokes = [
-            "Даров! Перехватил волну. О чем шумим? 🔥",
-            "На месте! Что интересного происходит? ⚡️",
-            "Ещё раз ку! Что задумал, бро? 🤖"
-        ]
-        reply_text = random.choice(fallback_vibe_jokes)
+            logging.warning(f"Модель {model_name} ошибка или лимит: {e}")
+            continue
 
     if reply_text:
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -379,6 +374,8 @@ async def handle_ai_response(message: types.Message):
             await message.reply(processed_text, parse_mode="HTML")
         except Exception:
             await message.reply(html.escape(processed_text), parse_mode="HTML")
+    else:
+        await message.reply("⚠️ <b>Лимит токенов Copilot AI!</b> Сделай /reset.", parse_mode="HTML")
 
 async def main():
     print(">>> Copilot AI запущен! <<<")
@@ -386,3 +383,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
