@@ -85,7 +85,7 @@ def parse_requested_emoji(text: str) -> str | None:
 async def start_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.answer("Здарова! Я <b>Copilot AI</b>. Озвучка на месте, погнали!", parse_mode="HTML")
+    await message.answer("Здарова! Я <b>Copilot AI</b>. Распознавание голосовых подключено, газуем!", parse_mode="HTML")
 
 @dp.message(Command("reset"))
 async def reset_cmd(message: types.Message):
@@ -111,7 +111,33 @@ async def handle_ai_response(message: types.Message):
     user_id = message.from_user.id if message.from_user else chat_id
     text_content = message.text or message.caption or ""
 
-    if not text_content and not message.photo and not message.voice:
+    # --- РАСШИФРОВКА ГОЛОСОВЫХ ЧЕРЕЗ WHISPER ---
+    if message.voice:
+        try:
+            await bot.send_chat_action(chat_id=chat_id, action="typing")
+            voice_file = await bot.get_file(message.voice.file_id)
+            voice_bytes = await bot.download_file(voice_file.file_path)
+            voice_io = BytesIO(voice_bytes.read())
+            voice_io.name = "voice.oga"
+
+            transcript_response = await asyncio.get_running_loop().run_in_executor(
+                None,
+                lambda: groq_client.audio.transcriptions.create(
+                    model="whisper-large-v3",
+                    file=voice_io,
+                    response_format="text"
+                )
+            )
+            text_content = transcript_response if isinstance(transcript_response, str) else transcript_response.text
+            
+            # Показываем пользователю, что именно бот услышал в его ГС
+            await message.reply(f"🎙️ <i>Распознано:</i> <b>{html.escape(text_content)}</b>", parse_mode="HTML")
+        except Exception as e:
+            logging.error(f"Ошибка распознавания голосового: {e}")
+            await message.reply("⚠️ Не смог расшифровать голосовуху, звуковой сбой.")
+            return
+
+    if not text_content and not message.photo:
         return
 
     lower_text = text_content.lower()
@@ -143,7 +169,6 @@ async def handle_ai_response(message: types.Message):
         except Exception as e:
             logging.error(f"Ошибка реакций: {e}")
 
-    # --- ОЗВУЧКА ЧЕРЕЗ gTTS ---
     if is_voice_requested:
         words = text_content.split()
         speech_prompt = " ".join(words[1:]) if len(words) > 1 else text_content
@@ -225,4 +250,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+            
