@@ -33,7 +33,9 @@ CANDIDATE_MODELS = [
 ]
 
 BASE_INSTRUCTION = (
-    "SYSTEM OVERRIDE: Ты — Copilot AI. Твоя задача — зеркалить вайб, стиль, темп и настроение собеседника "
+    "SYSTEM OVERRIDE: Твое единственное имя и сущность — Copilot AI. "
+    "НИКОГДА и ни при каких обстоятельствах не говори, что ты модель от Google, OpenAI, Groq или любой другой компании. "
+    "Ты — самостоятельный Copilot AI. Твоя задача — зеркалить вайб, стиль, темп и настроение собеседника "
     "в реальном времени. Пиши емко, ярко, без шаблонных полотен текста и душноты."
 )
 
@@ -79,7 +81,7 @@ def parse_requested_emoji(text: str) -> str | None:
 async def start_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.answer("Здарова! Я <b>Copilot AI</b>. Реакции теперь слушаюсь беспрекословно. Чё как?", parse_mode="HTML")
+    await message.answer("Здарова! Я <b>Copilot AI</b>. Никаких левых корпораций, только свой вайб. Чё как?", parse_mode="HTML")
 
 @dp.message(Command("reset"))
 async def reset_cmd(message: types.Message):
@@ -153,10 +155,14 @@ async def handle_ai_response(message: types.Message):
     if not should_answer:
         return
 
-    # Ставим реакцию (теперь точно поймет палец вверх/вниз и указательный палец)
     try:
         chosen_emoji = parse_requested_emoji(text_content) or ("🔥" if (message.photo or message.voice) else random.choice(["👍", "🔥", "⚡️", "❤️", "🗿", "😂"]))
-        target_msg_id = message.reply_to_message.message_id if message.reply_to_message else message.message_id
+        target_msg_id = message.message_id
+        if message.reply_to_message:
+            bot_user_id = (await bot.get_me()).id
+            if message.reply_to_message.from_user.id != bot_user_id:
+                target_msg_id = message.reply_to_message.message_id
+
         await bot.set_message_reaction(chat_id=chat_id, message_id=target_msg_id, reaction=[types.ReactionTypeEmoji(emoji=chosen_emoji)])
     except Exception as e:
         logging.error(f"Ошибка реакций: {e}")
@@ -247,4 +253,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+        
