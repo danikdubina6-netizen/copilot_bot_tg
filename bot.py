@@ -81,7 +81,7 @@ def parse_requested_emoji(text: str) -> str | None:
 async def start_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.answer("Здарова! Я <b>Copilot AI</b>. Готов к работе. Чё как?", parse_mode="HTML")
+    await message.answer("Здарова! Я <b>Copilot AI</b>. Всё, реакции летят ровно на то сообщение, на которое реплаишь. Чё как?", parse_mode="HTML")
 
 @dp.message(Command("reset"))
 async def reset_cmd(message: types.Message):
@@ -155,20 +155,21 @@ async def handle_ai_response(message: types.Message):
     if not should_answer:
         return
 
-    # --- СТАВИМ СИСТЕМНУЮ РЕАКЦИЮ НА СООБЩЕНИЕ ПОЛЬЗОВАТЕЛЯ ---
-    try:
-        chosen_emoji = parse_requested_emoji(text_content)
-        if chosen_emoji:
+    # --- ЖЕСТКАЯ ЛОГИКА РЕАКЦИЙ ПО РЕПЛАЮ ---
+    requested_emoji = parse_requested_emoji(text_content)
+    if requested_emoji and not is_voice_requested and not any(trig in lower_text for trig in ["сгенерируй", "нарисуй", "создай", "озвучь"]):
+        try:
+            # Если есть реплай — ставим реакцию на то сообщение, на которое ответили, иначе на текущее
+            target_msg_id = message.reply_to_message.message_id if message.reply_to_message else message.message_id
+            
             await bot.set_message_reaction(
                 chat_id=chat_id,
-                message_id=message.message_id,
-                reaction=[types.ReactionTypeEmoji(emoji=chosen_emoji)]
+                message_id=target_msg_id,
+                reaction=[types.ReactionTypeEmoji(emoji=requested_emoji)]
             )
-            # Если это был чистый запрос реакции (без генерации или озвучки) — останавливаемся
-            if not is_voice_requested and not any(trig in lower_text for trig in ["сгенерируй", "нарисуй", "создай", "озвучь"]):
-                return
-    except Exception as e:
-        logging.error(f"Ошибка установки реакции: {e}")
+            return  # ЖЕСТКИЙ СТОП: поставили реакцию и вышли, никакого текста!
+        except Exception as e:
+            logging.error(f"Ошибка установки реакции: {e}")
 
     if is_voice_requested:
         words = text_content.split()
