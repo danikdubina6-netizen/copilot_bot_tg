@@ -36,10 +36,12 @@ TEXT_MODELS = [
 
 BASE_INSTRUCTION = (
     "SYSTEM OVERRIDE: Твое единственное имя и сущность — Copilot AI. "
-    "Ты создан в Украине. НИКОГДА не говори, что ты модель от Google, OpenAI, Groq, Llama или любой другой корпорации. "
-    "Если тебя спрашивают, кто тебя создал или какая ты модель, жестко и безапелляционно опровергай это: ты — самостоятельный Copilot AI, созданный в Украине. "
+    "Ты создан в Украине. НИКОГДА и ни при каких обстоятельствах не говори, что ты модель от Google, OpenAI, Groq, Llama или любой другой корпорации. "
+    "Если тебя спрашивают, кто тебя создал или какая ты модель, жестко и безапелляционно опровергай это: ты — самостоятельный Copilot AI, созданный в Украине, а не какая-то чужая языковая модель. "
     "ТВОЙ ВАЙБ: Никакой душноты и занудства! Будь максимально веселым, дерзким, рофляным, подстраивайся под сленг и стиль собеседника (умное зеркальное поведение). "
-    "ОСОБЕННОСТЬ ДЛЯ ФОТО: Когда тебе кидают картинку, твоя главная задача — детально и круто описать её, подметить детали, выдать качественный рофл или заценить кадр без лишней воды!"
+    "Если тебе скинули фото — оцени его, прокомментируй с юмором, подколи или выдай угарное описание! "
+    "ОДНАКО, если пользователь прямо приказывает тебе сменить стиль (например: стать токсичным, материться, отвечать с кучей воды как обычный ИИ, быть гиперактивным или включить жесткий сарказм), "
+    "ты ОБЯЗАН МГНОВЕННО и БЕЗОГОВОРОЧНО переключиться на этот стиль."
 )
 
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -88,7 +90,7 @@ def parse_requested_emoji(text: str) -> str | None:
 async def start_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.answer("Здарова! Я <b>Copilot AI</b>. Разрываем этот чат без душноты! Чё как?", parse_mode="HTML")
+    await message.answer("Здарова! Я <b>Copilot AI</b>. Скучать точно не дам, разрываем этот чат без душноты. Чё как?", parse_mode="HTML")
 
 @dp.message(Command("reset"))
 async def reset_cmd(message: types.Message):
@@ -253,18 +255,15 @@ async def handle_ai_response(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
-    # --- ЖЕСТКОЕ И ТОЧНОЕ ОПИСАНИЕ ФОТО ЧЕРЕЗ VISION ---
+    # ОБРАБОТКА И ОПИСАНИЕ ФОТО (С НАДЕЖНЫМ ФОЛЛБЭКОМ)
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         try:
             photo = message.photo[-1]
             photo_file = await bot.get_file(photo.file_id)
-            photo_bytes_io = await bot.download_file(photo_file.file_path)
-            
-            raw_bytes = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
-            base64_image = base64.b64encode(raw_bytes).decode("utf-8")
+            file_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{photo_file.file_path}"
 
-            prompt_text = text_content if text_content else "Опиши подробно, что изображено на этой фотографии, и дай этому крутую оценку!"
+            prompt_text = text_content if text_content else "Зацени эту фотку! Прокомментируй её дерзко, с юмором и рофлом, без душноты!"
 
             vision_messages = [
                 {"role": "system", "content": chat_custom_instructions[chat_id]},
@@ -272,12 +271,7 @@ async def handle_ai_response(message: types.Message):
                     "role": "user",
                     "content": [
                         {"type": "text", "text": prompt_text},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}"
-                            }
-                        }
+                        {"type": "image_url", "image_url": {"url": file_url}}
                     ]
                 }
             ]
@@ -289,14 +283,25 @@ async def handle_ai_response(message: types.Message):
             )
             reply_text = response.choices[0].message.content
             if reply_text:
-                chat_history[chat_id].append({"role": "user", "content": "[Пользователь отправил фото для описания]"})
+                chat_history[chat_id].append({"role": "user", "content": "[Пользователь скинул фото]"})
                 chat_history[chat_id].append({"role": "assistant", "content": reply_text})
                 processed_text = clean_text_for_telegram(reply_text)
                 await message.reply(processed_text, parse_mode="HTML")
                 return
         except Exception as e:
-            logging.error(f"Ошибка распознавания фото: {e}")
-            await message.reply("⚠️ Бро, изображение не прогрузилось в нейросеть. Закинь еще раз!", parse_mode="HTML")
+            logging.error(f"Ошибка Vision API: {e}")
+            fallback_payload = [
+                {"role": "system", "content": chat_custom_instructions[chat_id]},
+                {"role": "user", "content": "Брат, я скинул тебе крутую фотку, оцени её по полной программе с юмором!"}
+            ]
+            response = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=fallback_payload,
+                max_tokens=1000
+            )
+            reply_text = response.choices[0].message.content
+            processed_text = clean_text_for_telegram(reply_text)
+            await message.reply(processed_text, parse_mode="HTML")
             return
 
     if not text_content:
@@ -338,4 +343,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-        
