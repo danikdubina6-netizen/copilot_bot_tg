@@ -85,7 +85,7 @@ def parse_requested_emoji(text: str) -> str | None:
 async def start_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.answer("Здарова! Я <b>Copilot AI</b>. Ошибки устранены, летим дальше!", parse_mode="HTML")
+    await message.answer("Здарова! Я <b>Copilot AI</b>. Озвучка на месте, погнали!", parse_mode="HTML")
 
 @dp.message(Command("reset"))
 async def reset_cmd(message: types.Message):
@@ -114,6 +114,9 @@ async def handle_ai_response(message: types.Message):
     if not text_content and not message.photo and not message.voice:
         return
 
+    lower_text = text_content.lower()
+    is_voice_requested = lower_text.startswith("озв") or lower_text.startswith("скаж") or "озвучь" in lower_text or "скажи голосом" in lower_text
+
     if chat_type == "private":
         now = time.time()
         if user_id not in user_rate_limits:
@@ -128,7 +131,7 @@ async def handle_ai_response(message: types.Message):
         user_rate_limits[user_id].append(now)
 
     requested_emoji = parse_requested_emoji(text_content)
-    if requested_emoji:
+    if requested_emoji and not is_voice_requested:
         try:
             target_msg_id = message.reply_to_message.message_id if message.reply_to_message else message.message_id
             await bot.set_message_reaction(
@@ -140,7 +143,33 @@ async def handle_ai_response(message: types.Message):
         except Exception as e:
             logging.error(f"Ошибка реакций: {e}")
 
-    lower_text = text_content.lower()
+    # --- ОЗВУЧКА ЧЕРЕЗ gTTS ---
+    if is_voice_requested:
+        words = text_content.split()
+        speech_prompt = " ".join(words[1:]) if len(words) > 1 else text_content
+        speech_prompt = speech_prompt or "Мда, пустой текст."
+
+        await bot.send_chat_action(chat_id=chat_id, action="record_voice")
+        try:
+            clean_for_speech = speech_prompt.replace('"', '').replace("'", "").replace('«', '').replace('»', '').replace('*', '')
+            tts = gTTS(text=clean_for_speech, lang='ru', slow=False)
+            audio_path = "voice_temp.ogg"
+            tts.save(audio_path)
+            
+            audio_file = types.FSInputFile(audio_path)
+            await message.reply_voice(
+                voice=audio_file,
+                caption=f"🎙️ <b>{html.escape(speech_prompt)}</b>",
+                parse_mode="HTML"
+            )
+            if os.path.exists(audio_path):
+                os.remove(audio_path)
+            return
+        except Exception as e:
+            logging.error(f"ОШИБКА ГОЛОСА: {e}")
+            await message.reply(f"⚠️ Ошибка озвучки: {e}")
+            return
+
     if any(trig in lower_text for trig in ["сгенерируй", "нарисуй", "создай картинку", "аватарка"]):
         clean_prompt = text_content
         for trig in ["сгенерируй", "нарисуй", "создай картинку", "аватарка"]:
@@ -196,4 +225,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-        
+    
