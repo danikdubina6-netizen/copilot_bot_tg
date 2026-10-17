@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
-# Собираем пул всех ключей
+# Собираем пул ключей для обхода лимитов
 API_KEYS = [
     os.getenv("GROQ_API_KEY"),
     os.getenv("GROQ_API_KEY_2"),
@@ -70,10 +70,6 @@ dp = Dispatcher()
 chat_history = {}
 chat_custom_instructions = {}
 group_message_counters = {}
-
-user_rate_limits = {}
-RATE_LIMIT_COUNT = 6
-RATE_LIMIT_PERIOD = 10
 
 def clean_text_for_telegram(text: str) -> str:
     text = text.replace("&nbsp;", " ")
@@ -180,19 +176,6 @@ async def handle_ai_response(message: types.Message):
             chat_history[chat_id] = []
 
     is_voice_requested = lower_text.startswith("озв") or lower_text.startswith("скаж") or "озвучь" in lower_text or "скажи голосом" in lower_text
-
-    if chat_type == "private":
-        now = time.time()
-        if user_id not in user_rate_limits:
-            user_rate_limits[user_id] = []
-        
-        user_rate_limits[user_id] = [t for t in user_rate_limits[user_id] if now - t < RATE_LIMIT_PERIOD]
-        
-        if len(user_rate_limits[user_id]) >= RATE_LIMIT_COUNT:
-            await message.reply("⚠️ <b>Порожняк не гони, тормози!</b> Слишком часто пишешь в личку, дай передохнуть.", parse_mode="HTML")
-            return
-            
-        user_rate_limits[user_id].append(now)
 
     should_answer = False
     if chat_type == "private" or getattr(message, "business_connection_id", None) or is_voice_requested or message.photo:
@@ -370,9 +353,8 @@ async def handle_ai_response(message: types.Message):
 
     reply_text = None
     
-    # 🔄 УМНЫЙ ЦИКЛ ПЕРЕБОРА: перебираем все ключи и модели до победного!
-    max_attempts = len(API_KEYS) * len(TEXT_MODELS) if API_KEYS else 1
-    for _ in range(max_attempts):
+    # Жесткий перебор ключей с отловом лимитов (429 / rate_limit)
+    for attempt in range(len(API_KEYS) if API_KEYS else 1):
         client = get_groq_client()
         if not client:
             break
@@ -381,18 +363,35 @@ async def handle_ai_response(message: types.Message):
                 response = client.chat.completions.create(
                     model=model_name, 
                     messages=messages_payload, 
-                    max_tokens=800
+                    max_tokens=600
                 )
                 reply_text = response.choices[0].message.content
                 if reply_text:
                     break
             except Exception as e:
-                logging.warning(f"⚠️ Ошибка модели {model_name} на ключе #{current_key_index + 1}: {e}")
-                rotate_key() # Сразу крутим ключ на лету
-                client = get_groq_client()
+                err_str = str(e).lower()
+                if "rate_limit" in err_str or "429" in err_str or "limit" in err_str:
+                    logging.warning(f"⚠️ Лимит на ключе #{current_key_index + 1}: {e}")
+                    rotate_key()
+                    client = get_groq_client()
+                else:
+                    logging.warning(f"⚠️ Ошибка модели {model_name}: {e}")
                 continue
         if reply_text:
             break
+
+    # Аварийный фоллбэк на первом ключе через 8b модель
+    if not reply_text and API_KEYS:
+        try:
+            emergency_client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=API_KEYS[0])
+            fallback_res = emergency_client.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=messages_payload,
+                max_tokens=300
+            )
+            reply_text = fallback_res.choices[0].message.content
+        except Exception as ex:
+            logging.error(f"Аварийный фоллбэк тоже лег: {ex}")
 
     if reply_text:
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -402,19 +401,19 @@ async def handle_ai_response(message: types.Message):
         except Exception:
             await message.reply(html.escape(processed_text), parse_mode="HTML")
     else:
-        emergency_replies = [
-            "Все ключи временно на перекуре, но я на связи! Напиши еще раз через пару секунд. ⚡️",
-            "Мой кибернетический мозг переваривает слишком много запросов. Секунду паузы, бро! 🔥",
-            "Лимиты API на всех аккаунтах трещат по швам. Давай еще раз, я готов! 🤖"
+        fallback_jokes = [
+            "На связи, бро! Чего кашляем, какой следующий вопрос? 🔥",
+            "Секунду, перехватил волну. Давай по новой, я весь вниманием! ⚡️",
+            "Мой нейросетевой аппарат на месте. Что за задача на этот раз? 🤖"
         ]
-        reply_text = random.choice(emergency_replies)
+        reply_text = random.choice(fallback_jokes)
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
         await message.reply(reply_text, parse_mode="HTML")
 
 async def main():
-    print(">>> Copilot AI запущен с мульти-ключом и умной ротацией! <<<")
+    print(">>> Copilot AI запущен с пулом ключей и умной ротацией! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-        
+            
