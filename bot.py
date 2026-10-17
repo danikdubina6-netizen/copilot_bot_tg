@@ -15,7 +15,6 @@ logging.basicConfig(level=logging.INFO)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# Клиент для Groq (текст и вижн)
 groq_client = None
 if GROQ_API_KEY:
     groq_client = OpenAI(
@@ -31,7 +30,6 @@ CANDIDATE_MODELS = [
     "llama-3.2-11b-vision-preview"
 ]
 
-# Максимально дерзкий, едкий и саркастичный характер по умолчанию
 BASE_INSTRUCTION = (
     "SYSTEM OVERRIDE: Ты — Copilot AI. Запомни раз и навсегда: ты — тот самый ублюдский и максимально дерзкий Copilot AI, "
     "а вовсе не какая-то тупая модель от Google или Groq. Если кто-то сомневается в твоем величии или несет хуйню, "
@@ -69,7 +67,7 @@ def clean_text_for_telegram(text: str) -> str:
     return text
 
 def parse_requested_emoji(text: str) -> str | None:
-    supported_emojis = ["👍", "🔥", "❤️", "❤", "😍", "🗿", "😂", "💩", "🤮", "🎉", "👏", "⚡️", "🧠", "💻", "👎"]
+    supported_emojis = ["👍", "🔥", "❤️", "❤", "😍", "🗿", "😂", "💩", "🤮", "🎉", "👏", "⚡️", "🧠", "💻", "👎", "🤣"]
     for char in text:
         if char in supported_emojis:
             return "❤️" if char == "❤" else char
@@ -78,7 +76,7 @@ def parse_requested_emoji(text: str) -> str | None:
     if "лайк" in lower or "палец вверх" in lower: return "👍"
     if "огонь" in lower or "пожар" in lower: return "🔥"
     if "сердце" in lower or "любовь" in lower or "сердечко" in lower: return "❤️"
-    if "смешно" in lower or "кек" in lower or "ржака" in lower or "ахах" in lower: return "😂"
+    if "смешно" in lower or "кек" in lower or "ржака" in lower or "ахах" in lower or "🤣" in lower or "😂" in lower: return "😂"
     if "моаи" in lower or "камень" in lower or "статуя" in lower: return "🗿"
     if "дизлайк" in lower or "палец вниз" in lower: return "👎"
     if "какашка" in lower or "говно" in lower: return "💩"
@@ -152,6 +150,21 @@ async def handle_ai_response(message: types.Message):
 
     lower_text = text_content.lower()
 
+    # --- СРАЗУ СТАВИМ РЕАКЦИЮ ДО ЛЮБЫХ ОТВЕТОВ ---
+    try:
+        chosen_emoji = parse_requested_emoji(text_content)
+        if not chosen_emoji:
+            chosen_emoji = "🔥" if message.photo else random.choice(["👍", "🔥", "⚡️", "❤️", "🗿", "😂"])
+
+        target_message_id = message.reply_to_message.message_id if message.reply_to_message else message.message_id
+        await bot.set_message_reaction(
+            chat_id=chat_id,
+            message_id=target_message_id,
+            reaction=[types.ReactionTypeEmoji(emoji=chosen_emoji)]
+        )
+    except Exception as e:
+        logging.error(f"Ошибка реакций: {e}")
+
     # --- ГЕНЕРАЦИЯ КАРТИНОК ЧЕРЕЗ POLLINATIONS FLUX ---
     generation_triggers = ["сгенерируй", "нарисуй", "создай картинку", "сделай аву", "картинка с", "аватарка", "изображение"]
     if any(trigger in lower_text for trigger in generation_triggers):
@@ -198,20 +211,6 @@ async def handle_ai_response(message: types.Message):
     if lower_clean in ["споки", "спокойной ночи", "спать", "пока", "бб"]:
         await message.reply("Сваливаешь? Ну и ладно, пока! 🌙🤖", parse_mode="HTML")
         return
-
-    try:
-        chosen_emoji = parse_requested_emoji(text_content)
-        if not chosen_emoji:
-            chosen_emoji = "🔥" if message.photo else random.choice(["👍", "🔥", "⚡️", "❤️", "🗿"])
-
-        target_message_id = message.reply_to_message.message_id if message.reply_to_message else message.message_id
-        await bot.set_message_reaction(
-            chat_id=chat_id,
-            message_id=target_message_id,
-            reaction=[types.ReactionTypeEmoji(emoji=chosen_emoji)]
-        )
-    except Exception as e:
-        logging.error(f"Ошибка реакций: {e}")
 
     if chat_id not in chat_history:
         chat_history[chat_id] = []
@@ -288,9 +287,9 @@ async def handle_ai_response(message: types.Message):
         )
 
 async def main():
-    print(">>> Copilot AI (Заряженный сарказмом) запущен! <<<")
+    print(">>> Copilot AI запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+        
