@@ -92,7 +92,7 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b>. Готов слушать голосовухи и озвучивать тексты без лишних отговорок. Чё как?",
+        "Здарова! Я <b>Copilot AI</b>. Готов к полному диалогу без урезанных фраз. Чё как?",
         parse_mode="HTML"
     )
 
@@ -101,7 +101,7 @@ async def reset_cmd(message: types.Message):
     chat_id = message.chat.id
     chat_history[chat_id] = []
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
-    await message.reply("🧠 Память сброшена, настройки на максимум!")
+    await message.reply("🧠 Память сброшена!")
 
 @dp.message()
 async def handle_ai_response(message: types.Message):
@@ -230,7 +230,7 @@ async def handle_ai_response(message: types.Message):
         await message.reply("🔄 Приказ принят!", parse_mode="HTML")
         return
 
-    # ОЗВУЧКА СООБЩЕНИЙ (если просят голосом)
+    # ОЗВУЧКА СООБЩЕНИЙ
     voice_triggers = ["скажи голосом", "озвучь", "наговори", "голосом"]
     is_voice_requested = any(trig in lower_text for trig in voice_triggers)
     
@@ -242,7 +242,7 @@ async def handle_ai_response(message: types.Message):
     # УМНОЕ ДИНАМИЧЕСКОЕ ЗЕРКАЛИРОВАНИЕ
     mirror_adaptation = (
         f"\n\n[ДИНАМИЧЕСКИЙ ВАЙБ В МОМЕНТЕ]: Пользователь написал/сказал: '{text_content}'. "
-        "Мгновенно зеркаль его стиль, сленг и настроение. Никакой духоты — отвечай весело, живо, коротко и в тему."
+        "Мгновенно зеркаль его стиль, сленг и настроение. Никакой духоты — отвечай весело, живо и полностью договаривай мысли до конца."
     )
 
     lower_clean = text_content.lower().strip()
@@ -297,7 +297,7 @@ async def handle_ai_response(message: types.Message):
                 lambda m=model_name: groq_client.chat.completions.create(
                     model=m,
                     messages=messages_payload,
-                    max_tokens=600
+                    max_tokens=1000  # Увеличили лимит токенов, чтобы фразы никогда не обрывались на полуслове
                 )
             )
             reply_text = response.choices[0].message.content
@@ -308,18 +308,18 @@ async def handle_ai_response(message: types.Message):
             continue
 
     if reply_text:
-        # Если просили озвучить, а модель попыталась отмазаться — принудительно заменяем текст на то, что просили озвучить
         if is_voice_requested and any(err_word in reply_text.lower() for err_word in ["нет голоса", "нельзя озвучивать", "не умею"]):
             reply_text = speech_prompt if speech_prompt else "Мда, заставил озвучить блин."
 
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
         processed_text = clean_text_for_telegram(reply_text)
 
-        # Если запросили голосовуху — генерируем аудио через gTTS и шлем как voice
         if is_voice_requested:
             await bot.send_chat_action(chat_id=chat_id, action="record_voice")
             try:
                 clean_for_speech = re.sub(r'<[^>]+>', '', processed_text)
+                clean_for_speech = clean_for_speech.replace('"', '').replace("'", "").replace('«', '').replace('»', '').replace('*', '')
+                
                 tts = gTTS(text=clean_for_speech, lang='ru', slow=False)
                 voice_io = BytesIO()
                 tts.write_to_fp(voice_io)
@@ -354,4 +354,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+            
