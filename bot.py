@@ -5,6 +5,7 @@ import random
 import re
 import html
 import base64
+import urllib.parse
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
 from openai import OpenAI
@@ -13,8 +14,6 @@ logging.basicConfig(level=logging.INFO)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-# Безопасно подтягиваем ключ OpenAI из переменных окружения GitHub Actions / сервака
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # Клиент для Groq (текст и вижн)
 groq_client = None
@@ -22,13 +21,6 @@ if GROQ_API_KEY:
     groq_client = OpenAI(
         base_url="https://api.groq.com/openai/v1",
         api_key=GROQ_API_KEY
-    )
-
-# Клиент для OpenAI (DALL-E 3)
-openai_client = None
-if OPENAI_API_KEY:
-    openai_client = OpenAI(
-        api_key=OPENAI_API_KEY
     )
 
 BOT_USERNAME = "Copilot_AI2026_bot"
@@ -101,7 +93,7 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b> (теперь с ультимативным DALL-E 3 на борту). Чё хотел?\n\n"
+        "Здарова! Я <b>Copilot AI</b> (надежный генератор на борту). Чё хотел?\n\n"
         "💡 <i>Кстати, ты можешь на ходу менять мое поведение фразами вроде: "
         "«Веди себя дружелюбно», «Будь токсичным с матами», «Объясняй как душный препод с водой» или задать свой собственный характер!</i>",
         parse_mode="HTML"
@@ -161,7 +153,7 @@ async def handle_ai_response(message: types.Message):
 
     lower_text = text_content.lower()
 
-    # --- ГЕНЕРАЦИЯ КАРТИНОК ЧЕРЕЗ DALL-E 3 ---
+    # --- ГЕНЕРАЦИЯ КАРТИНОК ЧЕРЕЗ POLLINATIONS FLUX ---
     generation_triggers = ["сгенерируй", "нарисуй", "создай картинку", "сделай аву", "картинка с", "аватарка", "изображение"]
     if any(trigger in lower_text for trigger in generation_triggers):
         clean_prompt = text_content
@@ -173,25 +165,12 @@ async def handle_ai_response(message: types.Message):
 
         await bot.send_chat_action(chat_id=chat_id, action="typing")
 
-        if not openai_client:
-            await message.reply("⚠️ Ошибка: OPENAI_API_KEY не настроен в секретах GitHub!")
-            return
+        # Прямо передаем чистый промпт с принудительным выбором топовой модели flux
+        encoded_prompt = urllib.parse.quote(clean_prompt)
+        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model=flux&width=1024&height=1024&nologo=true&seed={random.randint(1, 999999)}"
 
+        await bot.send_chat_action(chat_id=chat_id, action="upload_photo")
         try:
-            loop = asyncio.get_running_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: openai_client.images.generate(
-                    model="dall-e-3",
-                    prompt=clean_prompt,
-                    size="1024x1024",
-                    quality="standard",
-                    n=1,
-                )
-            )
-            image_url = response.data[0].url
-
-            await bot.send_chat_action(chat_id=chat_id, action="upload_photo")
             await message.reply_photo(
                 photo=image_url,
                 caption=f"🎨 <b>{html.escape(clean_prompt)}</b>",
@@ -199,8 +178,8 @@ async def handle_ai_response(message: types.Message):
             )
             return
         except Exception as e:
-            logging.error(f"Ошибка генерации DALL-E 3: {e}")
-            await message.reply("⚠️ Ошибка генерации картинки через DALL-E 3. Лимиты или трабл с ключом.")
+            logging.error(f"Ошибка генерации картинки: {e}")
+            await message.reply("⚠️ Бро, сервер генерации картинок прилёг отдохнуть. Попробуй еще раз.")
             return
 
     if chat_id not in chat_custom_instructions:
@@ -315,9 +294,9 @@ async def handle_ai_response(message: types.Message):
         )
 
 async def main():
-    print(">>> Copilot AI (с DALL-E 3) запущен! <<<")
+    print(">>> Copilot AI запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-            
+    
