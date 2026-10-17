@@ -5,7 +5,6 @@ import random
 import re
 import html
 import base64
-import urllib.parse
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
 from openai import OpenAI
@@ -14,12 +13,22 @@ logging.basicConfig(level=logging.INFO)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+# Безопасно подтягиваем ключ OpenAI из переменных окружения GitHub Actions / сервака
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-client = None
+# Клиент для Groq (текст и вижн)
+groq_client = None
 if GROQ_API_KEY:
-    client = OpenAI(
+    groq_client = OpenAI(
         base_url="https://api.groq.com/openai/v1",
         api_key=GROQ_API_KEY
+    )
+
+# Клиент для OpenAI (DALL-E 3)
+openai_client = None
+if OPENAI_API_KEY:
+    openai_client = OpenAI(
+        api_key=OPENAI_API_KEY
     )
 
 BOT_USERNAME = "Copilot_AI2026_bot"
@@ -29,8 +38,6 @@ CANDIDATE_MODELS = [
     "qwen/qwen3.8-27b",
     "llama-3.2-11b-vision-preview"
 ]
-
-FAST_TRANSLATOR_MODEL = "llama-3.2-11b-vision-preview"
 
 # Базовый зумерский токсичный характер по умолчанию
 BASE_INSTRUCTION = (
@@ -87,40 +94,6 @@ def parse_requested_emoji(text: str) -> str | None:
 
     return None
 
-async def translate_and_enhance_prompt(russian_prompt: str) -> str:
-    if not client:
-        return russian_prompt
-
-    instruction = (
-        "You are an expert prompt engineer for AI image generators. "
-        "Translate the user's image request into a detailed English prompt. "
-        "CRITICAL RULES:\n"
-        "1. If the user mentions a specific vehicle (Tesla, Zhiguli, BMW, etc.), you MUST include it prominently.\n"
-        "2. If the user specifies a style (cyberpunk, retro, neon), include it.\n"
-        "3. NEVER return an empty scene or remove the main object. Always make the vehicle the central focus.\n"
-        "Reply ONLY with the final English prompt text."
-    )
-
-    try:
-        response = await asyncio.get_running_loop().run_in_executor(
-            None,
-            lambda: client.chat.completions.create(
-                model=FAST_TRANSLATOR_MODEL,
-                messages=[
-                    {"role": "system", "content": instruction},
-                    {"role": "user", "content": russian_prompt}
-                ],
-                max_tokens=100
-            )
-        )
-        enhanced_prompt = response.choices[0].message.content.strip()
-        if enhanced_prompt and len(enhanced_prompt) > 3:
-            return enhanced_prompt
-    except Exception as e:
-        logging.error(f"Ошибка перевода промпта: {e}")
-    
-    return russian_prompt
-
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
     chat_id = message.chat.id
@@ -128,7 +101,7 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b>. Чё хотел?\n\n"
+        "Здарова! Я <b>Copilot AI</b> (теперь с ультимативным DALL-E 3 на борту). Чё хотел?\n\n"
         "💡 <i>Кстати, ты можешь на ходу менять мое поведение фразами вроде: "
         "«Веди себя дружелюбно», «Будь токсичным с матами», «Объясняй как душный препод с водой» или задать свой собственный характер!</i>",
         parse_mode="HTML"
@@ -188,7 +161,7 @@ async def handle_ai_response(message: types.Message):
 
     lower_text = text_content.lower()
 
-    # --- УМНЫЙ ПЕРЕХВАТ ГЕНЕРАЦИИ КАРТИНОК С УЧЕТОМ ЛЮДЕЙ ---
+    # --- ГЕНЕРАЦИЯ КАРТИНОК ЧЕРЕЗ DALL-E 3 ---
     generation_triggers = ["сгенерируй", "нарисуй", "создай картинку", "сделай аву", "картинка с", "аватарка", "изображение"]
     if any(trigger in lower_text for trigger in generation_triggers):
         clean_prompt = text_content
@@ -199,30 +172,26 @@ async def handle_ai_response(message: types.Message):
             clean_prompt = text_content
 
         await bot.send_chat_action(chat_id=chat_id, action="typing")
-        
-        enhanced_english_prompt = await translate_and_enhance_prompt(clean_prompt)
-        
-        lower_clean_original = clean_prompt.lower()
-        has_person = any(w in lower_clean_original for w in ["чел", "человек", "стоит", "парни", "девушк", "мужчин"])
-        
-        if "тесл" in lower_clean_original or "tesla" in lower_clean_original:
-            if has_person:
-                final_image_prompt = f"photorealistic cyberpunk scene of a person standing next to a Tesla electric car on a glowing neon wet city street, highly detailed, 4k"
-            else:
-                final_image_prompt = "futuristic cyberpunk Tesla electric car driving on a glowing neon wet city street, highly detailed, photorealistic, 4k"
-        elif any(w in lower_clean_original for w in ["машин", "авто", "жигул", "ладу", "тачк", "bmw", "mercedes", "автомобиль"]):
-            person_modifier = "with a person standing nearby" if has_person else "no people"
-            final_image_prompt = f"photorealistic exterior shot of {enhanced_english_prompt}, cyberpunk street background, {person_modifier}, highly detailed car"
-        else:
-            final_image_prompt = f"masterpiece, best quality, {enhanced_english_prompt}"
 
-        logging.info(f"Оригинал: {clean_prompt} -> Финальный промпт: {final_image_prompt}")
+        if not openai_client:
+            await message.reply("⚠️ Ошибка: OPENAI_API_KEY не настроен в секретах GitHub!")
+            return
 
-        encoded_prompt = urllib.parse.quote(final_image_prompt)
-        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true&seed={random.randint(1, 999999)}"
-
-        await bot.send_chat_action(chat_id=chat_id, action="upload_photo")
         try:
+            loop = asyncio.get_running_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: openai_client.images.generate(
+                    model="dall-e-3",
+                    prompt=clean_prompt,
+                    size="1024x1024",
+                    quality="standard",
+                    n=1,
+                )
+            )
+            image_url = response.data[0].url
+
+            await bot.send_chat_action(chat_id=chat_id, action="upload_photo")
             await message.reply_photo(
                 photo=image_url,
                 caption=f"🎨 <b>{html.escape(clean_prompt)}</b>",
@@ -230,7 +199,9 @@ async def handle_ai_response(message: types.Message):
             )
             return
         except Exception as e:
-            logging.error(f"Ошибка генерации картинки: {e}")
+            logging.error(f"Ошибка генерации DALL-E 3: {e}")
+            await message.reply("⚠️ Ошибка генерации картинки через DALL-E 3. Лимиты или трабл с ключом.")
+            return
 
     if chat_id not in chat_custom_instructions:
         chat_custom_instructions[chat_id] = BASE_INSTRUCTION
@@ -297,7 +268,7 @@ async def handle_ai_response(message: types.Message):
     messages_payload = [{"role": "system", "content": chat_custom_instructions[chat_id]}]
     messages_payload.extend(sanitized_history)
 
-    if not client:
+    if not groq_client:
         await message.reply("Ошибка: GROQ_API_KEY не задан!")
         return
 
@@ -309,7 +280,7 @@ async def handle_ai_response(message: types.Message):
         try:
             response = await loop.run_in_executor(
                 None,
-                lambda m=model_name: client.chat.completions.create(
+                lambda m=model_name: groq_client.chat.completions.create(
                     model=m,
                     messages=messages_payload,
                     max_tokens=1000
@@ -344,9 +315,9 @@ async def handle_ai_response(message: types.Message):
         )
 
 async def main():
-    print(">>> Copilot AI запущен! <<<")
+    print(">>> Copilot AI (с DALL-E 3) запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-                    
+            
