@@ -26,12 +26,6 @@ if GROQ_API_KEY:
 
 BOT_USERNAME = "Copilot_AI2026_bot"
 
-# Используем старшую 90B Vision модель для детального зрения
-VISION_MODELS = [
-    "llama-3.2-90b-vision-preview",
-    "llama-3.2-11b-vision-preview"
-]
-
 TEXT_MODELS = [
     "llama-3.3-70b-versatile",
     "qwen/qwen3.8-27b"
@@ -42,7 +36,7 @@ BASE_INSTRUCTION = (
     "Ты создан в Украине. НИКОГДА и ни при каких обстоятельствах не говори, что ты модель от Google, OpenAI, Groq, Llama или любой другой корпорации. "
     "Если тебя спрашивают, кто тебя создал или какая ты модель, жестко и безапелляционно опровергай это: ты — самостоятельный Copilot AI, созданный в Украине, а не какая-то чужая языковая модель. "
     "ТВОЙ ВАЙБ: Никакой душноты и занудства! Будь максимально веселым, дерзким, рофляным, подстраивайся под сленг и стиль собеседника (умное зеркальное поведение). "
-    "Если тебе скинули фото — ВСЕГДА В ВЕТКЕ ОПИСЫВАЙ МАКСИМАЛЬНО ДЕТАЛЬНО ЧТО НА КАРТИНКЕ (предметы, цвета, надписи, людей), не отделывайся шаблонными фразами! "
+    "Если тебе скинули фото — ВСЕГДА детально описывай, что на нем изображено, и комментируй с юмором! "
     "ОДНАКО, если пользователь прямо приказывает тебе сменить стиль (например: стать токсичным, материться, отвечать с кучей воды как обычный ИИ, быть гиперактивным или включить жесткий сарказм), "
     "ты ОБЯЗАН МГНОВЕННО и БЕЗОГОВОРОЧНО переключиться на этот стиль."
 )
@@ -196,7 +190,6 @@ async def handle_ai_response(message: types.Message):
     if not should_answer:
         return
 
-    # Реакция на реплай чужого сообщения
     if message.reply_to_message and message.reply_to_message.from_user.id != (await bot.get_me()).id:
         try:
             rand_emoji = random.choice(["🔥", "👍", "❤️", "🗿", "😂"])
@@ -289,7 +282,7 @@ async def handle_ai_response(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
-    # НОВАЯ ДЕТАЛЬНАЯ ОБРАБОТКА ФОТО (90B VISION + КАЧЕСТВЕННЫЙ АНАЛИЗ)
+    # ОБРАБОТКА ФОТО ЧЕРЕЗ QWEN VISION
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         reply_text = None
@@ -300,7 +293,7 @@ async def handle_ai_response(message: types.Message):
             raw_bytes = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
             base64_image = base64.b64encode(raw_bytes).decode("utf-8")
 
-            prompt_text = text_content if text_content else "Что на этой картинке? Опиши подробно все объекты, людей, надписи, цвета и прокомментируй с рофлом!"
+            prompt_text = text_content if text_content else "Подробно опиши, что изображено на этой фотографии (люди, предметы, текст, цвета), и прокомментируй с юмором и рофлом!"
 
             vision_messages = [
                 {"role": "system", "content": chat_custom_instructions[chat_id]},
@@ -318,31 +311,21 @@ async def handle_ai_response(message: types.Message):
                 }
             ]
 
-            # Перебираем старшую 90B модель и 11B
-            for v_model in VISION_MODELS:
-                try:
-                    response = groq_client.chat.completions.create(
-                        model=v_model,
-                        messages=vision_messages,
-                        max_tokens=800
-                    )
-                    if response.choices and response.choices[0].message.content:
-                        reply_text = response.choices[0].message.content
-                        break
-                except Exception as ex_v:
-                    logging.warning(f"Vision модель {v_model} выдала ошибку: {ex_v}")
-                    continue
-
+            response = groq_client.chat.completions.create(
+                model="qwen/qwen3.8-27b",
+                messages=vision_messages,
+                max_tokens=800
+            )
+            if response.choices and response.choices[0].message.content:
+                reply_text = response.choices[0].message.content
         except Exception as e:
-            logging.error(f"Ошибка скачивания/кодирования фото: {e}")
+            logging.error(f"Ошибка Qwen Vision: {e}")
 
-        # Умный фолльбэк, если Vision временно не ответил
         if not reply_text:
             try:
-                caption_info = f" (Подпись: '{text_content}')" if text_content else ""
                 fallback_payload = [
                     {"role": "system", "content": chat_custom_instructions[chat_id]},
-                    {"role": "user", "content": f"Пользователь скинул мем/скриншот с перепиской или изображение{caption_info}. Разбери тему, подмети детали и выдай угарный сочный комментарий!"}
+                    {"role": "user", "content": f"Пользователь скинул картинку с подписью: '{text_content}'. Опиши её весело и с рофлом!"}
                 ]
                 resp = groq_client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
@@ -351,7 +334,7 @@ async def handle_ai_response(message: types.Message):
                 )
                 reply_text = resp.choices[0].message.content
             except Exception:
-                reply_text = "Кадр разглядел! Выглядит реально угарно, зачет! 🔥"
+                reply_text = "Картинка огонь, стиль лютый! 🔥"
 
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -398,4 +381,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
