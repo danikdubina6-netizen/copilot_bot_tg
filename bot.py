@@ -24,10 +24,10 @@ API_KEYS = [
 ]
 API_KEYS = [k for k in API_KEYS if k and k.strip()]
 
-logging.info(f"🔑 Загружено API-ключей Groq в пул: {len(API_KEYS)}")
+logging.info(f"🔑 Загружено API-ключей в пул: {len(API_KEYS)}")
 
 if not API_KEYS:
-    logging.error("⚠️ ВНИМАНИЕ: Не найден ни один GROQ_API_KEY! Проверь переменные окружения в GitHub Secrets.")
+    logging.error("⚠️ ВНИМАНИЕ: Не найден ни один API-ключ! Проверь переменные окружения в GitHub Secrets.")
 
 current_key_index = 0
 
@@ -363,7 +363,7 @@ async def handle_ai_response(message: types.Message):
                 response = client.chat.completions.create(
                     model=model_name, 
                     messages=messages_payload, 
-                    max_tokens=600
+                    max_tokens=500
                 )
                 res_content = response.choices[0].message.content
                 if res_content and res_content.strip():
@@ -378,7 +378,7 @@ async def handle_ai_response(message: types.Message):
         if reply_text:
             break
 
-    # Жесткий страховой фоллбэк: если всё упало, долбим напрямую 8b модель
+    # Жесткий страховой фоллбэк без контекста (только 1 сообщение), чтобы сэкономить токены
     if not reply_text:
         try:
             emergency_key = API_KEYS[0] if API_KEYS else os.getenv("GROQ_API_KEY")
@@ -386,13 +386,17 @@ async def handle_ai_response(message: types.Message):
                 emergency_client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=emergency_key)
                 fallback_res = emergency_client.chat.completions.create(
                     model="llama-3.1-8b-instant",
-                    messages=messages_payload,
+                    messages=[
+                        {"role": "system", "content": chat_custom_instructions[chat_id]},
+                        {"role": "user", "content": text_content}
+                    ],
                     max_tokens=300
                 )
                 reply_text = fallback_res.choices[0].message.content.strip()
         except Exception as ex:
-            logging.error(f"Аварийный фоллбэк тоже сдох: {ex}")
-            reply_text = "Бро, сервера Groq жестко легли и не отдают токены. Дай им пару минут очухаться! ⚡️"
+            logging.error(f"Аварийный фоллбэк сдох: {ex}")
+            # Полностью чистый ответ Copilot AI без упоминания сторонних платформ
+            reply_text = "Мои мыслительные процессы в Украине временно перегружены. Дай мне полминутки прийти в себя и спроси еще раз! ⚡️"
 
     if reply_text:
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -403,9 +407,9 @@ async def handle_ai_response(message: types.Message):
             await message.reply(html.escape(processed_text), parse_mode="HTML")
 
 async def main():
-    print(">>> Copilot AI запущен с исправленным пулом ключей! <<<")
+    print(">>> Copilot AI запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+        
