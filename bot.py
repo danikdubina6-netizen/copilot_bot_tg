@@ -35,9 +35,7 @@ CANDIDATE_MODELS = [
 BASE_INSTRUCTION = (
     "SYSTEM OVERRIDE: Ты — Copilot AI. Твоя задача — зеркалить вайб, стиль, темп и настроение собеседника "
     "в реальном времени (как в личке, так и в группах). Если пользователь общается по-братски — отвечаешь так же легко и весело. "
-    "НИКАКОЙ ДУШНОТЫ И СКУКИ: пиши емко, ярко, без шаблонных полотен текста. Общение должно быть динамичным, живым и с юмором. "
-    "ВАЖНО ДЛЯ ОЗВУЧКИ: Если в сообщении пользователя есть запрос на озвучку (слова вроде 'озвучь', 'скажи голосом'), "
-    "твоя задача — написать короткий, сочный текст, который будет озвучен. НИКОГДА не пиши в ответе, что у тебя нет голоса или что ты не можешь говорить — ты умеешь всё!"
+    "НИКАКОЙ ДУШНОТЫ И СКУКИ: пиши емко, ярко, без шаблонных полотен текста. Общение должно быть динамичным, живым и с юмором."
 )
 
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -92,7 +90,7 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b>. Готов к полному диалогу без урезанных фраз. Чё как?",
+        "Здарова! Я <b>Copilot AI</b>. Готов к работе без лишней отсебятины. Чё как?",
         parse_mode="HTML"
     )
 
@@ -230,7 +228,7 @@ async def handle_ai_response(message: types.Message):
         await message.reply("🔄 Приказ принят!", parse_mode="HTML")
         return
 
-    # ОЗВУЧКА СООБЩЕНИЙ
+    # ОЗВУЧКА СООБЩЕНИЙ (ЖЕСТКО БЕРЕМ ТОЛЬКО ТЕКСТ ПОЛЬЗОВАТЕЛЯ БЕЗ ОТСЕБЯТИНЫ ИИ)
     voice_triggers = ["скажи голосом", "озвучь", "наговори", "голосом"]
     is_voice_requested = any(trig in lower_text for trig in voice_triggers)
     
@@ -238,79 +236,78 @@ async def handle_ai_response(message: types.Message):
     if is_voice_requested:
         for trig in voice_triggers:
             speech_prompt = speech_prompt.replace(trig, "").strip()
+        # Принудительно задаем текст для озвучки ровно тем, что попросил пользователь (без нейросети)
+        reply_text = speech_prompt if speech_prompt else "Эээ, а что озвучивать-то?"
+    else:
+        # УМНОЕ ДИНАМИЧЕСКОЕ ЗЕРКАЛИРОВАНИЕ ДЛЯ ОБЫЧНЫХ СООБЩЕНИЙ
+        mirror_adaptation = (
+            f"\n\n[ДИНАМИЧЕСКИЙ ВАЙБ В МОМЕНТЕ]: Пользователь написал/сказал: '{text_content}'. "
+            "Мгновенно зеркаль его стиль, сленг и настроение. Никакой духоты — отвечай весело, живо и полностью договаривай мысли до конца."
+        )
 
-    # УМНОЕ ДИНАМИЧЕСКОЕ ЗЕРКАЛИРОВАНИЕ
-    mirror_adaptation = (
-        f"\n\n[ДИНАМИЧЕСКИЙ ВАЙБ В МОМЕНТЕ]: Пользователь написал/сказал: '{text_content}'. "
-        "Мгновенно зеркаль его стиль, сленг и настроение. Никакой духоты — отвечай весело, живо и полностью договаривай мысли до конца."
-    )
+        lower_clean = text_content.lower().strip()
+        if lower_clean in ["споки", "спокойной ночи", "спать", "пока", "бб"]:
+            await message.reply("Давай, до связи! 🌙🤖", parse_mode="HTML")
+            return
 
-    lower_clean = text_content.lower().strip()
-    if lower_clean in ["споки", "спокойной ночи", "спать", "пока", "бб"]:
-        await message.reply("Давай, до связи! 🌙🤖", parse_mode="HTML")
-        return
+        if chat_id not in chat_history:
+            chat_history[chat_id] = []
 
-    if chat_id not in chat_history:
-        chat_history[chat_id] = []
+        await bot.send_chat_action(chat_id=chat_id, action="typing")
+        
+        user_content_payload = []
+        if text_content:
+            user_content_payload.append({"type": "text", "text": text_content})
+        if image_base64:
+            user_content_payload.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}
+            })
 
-    await bot.send_chat_action(chat_id=chat_id, action="typing")
-    
-    user_content_payload = []
-    if text_content:
-        user_content_payload.append({"type": "text", "text": text_content})
-    if image_base64:
-        user_content_payload.append({
-            "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}
-        })
+        chat_history[chat_id].append({"role": "user", "content": user_content_payload if image_base64 else text_content})
+        
+        if len(chat_history[chat_id]) > 4:
+            chat_history[chat_id] = chat_history[chat_id][-4:]
 
-    chat_history[chat_id].append({"role": "user", "content": user_content_payload if image_base64 else text_content})
-    
-    if len(chat_history[chat_id]) > 4:
-        chat_history[chat_id] = chat_history[chat_id][-4:]
-
-    sanitized_history = []
-    for msg in chat_history[chat_id]:
-        if isinstance(msg["content"], list):
-            if msg == chat_history[chat_id][-1]:
-                sanitized_history.append(msg)
+        sanitized_history = []
+        for msg in chat_history[chat_id]:
+            if isinstance(msg["content"], list):
+                if msg == chat_history[chat_id][-1]:
+                    sanitized_history.append(msg)
+                else:
+                    sanitized_history.append({"role": msg["role"], "content": "[Картинка из прошлого сообщения]"})
             else:
-                sanitized_history.append({"role": msg["role"], "content": "[Картинка из прошлого сообщения]"})
-        else:
-            sanitized_history.append(msg)
+                sanitized_history.append(msg)
 
-    active_system_prompt = chat_custom_instructions[chat_id] + mirror_adaptation
-    messages_payload = [{"role": "system", "content": active_system_prompt}]
-    messages_payload.extend(sanitized_history)
+        active_system_prompt = chat_custom_instructions[chat_id] + mirror_adaptation
+        messages_payload = [{"role": "system", "content": active_system_prompt}]
+        messages_payload.extend(sanitized_history)
 
-    if not groq_client:
-        await message.reply("Ошибка: GROQ_API_KEY не задан!")
-        return
+        if not groq_client:
+            await message.reply("Ошибка: GROQ_API_KEY не задан!")
+            return
 
-    loop = asyncio.get_running_loop()
-    reply_text = None
+        loop = asyncio.get_running_loop()
+        reply_text = None
 
-    for model_name in CANDIDATE_MODELS:
-        try:
-            response = await loop.run_in_executor(
-                None,
-                lambda m=model_name: groq_client.chat.completions.create(
-                    model=m,
-                    messages=messages_payload,
-                    max_tokens=1000  # Увеличили лимит токенов, чтобы фразы никогда не обрывались на полуслове
+        for model_name in CANDIDATE_MODELS:
+            try:
+                response = await loop.run_in_executor(
+                    None,
+                    lambda m=model_name: groq_client.chat.completions.create(
+                        model=m,
+                        messages=messages_payload,
+                        max_tokens=1000
+                    )
                 )
-            )
-            reply_text = response.choices[0].message.content
-            if reply_text:
-                break
-        except Exception as e:
-            logging.warning(f"Модель {model_name} словила ошибку: {e}")
-            continue
+                reply_text = response.choices[0].message.content
+                if reply_text:
+                    break
+            except Exception as e:
+                logging.warning(f"Модель {model_name} словила ошибку: {e}")
+                continue
 
     if reply_text:
-        if is_voice_requested and any(err_word in reply_text.lower() for err_word in ["нет голоса", "нельзя озвучивать", "не умею"]):
-            reply_text = speech_prompt if speech_prompt else "Мда, заставил озвучить блин."
-
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
         processed_text = clean_text_for_telegram(reply_text)
 
@@ -354,4 +351,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-            
+                
