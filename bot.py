@@ -153,6 +153,98 @@ async def handle_ai_response(message: types.Message):
             chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     chat_last_interaction[chat_id] = now
 
+    if chat_id not in chat_custom_instructions:
+        chat_custom_instructions[chat_id] = BASE_INSTRUCTION
+
+    if chat_id not in chat_history:
+        chat_history[chat_id] = []
+
+    # ==========================================
+    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО (С СБРОСОМ ИСТОРИИ И БЕСКОНЕЧНЫМ ПРОБОЕМ)
+    # ==========================================
+    if message.photo:
+        await bot.send_chat_action(chat_id=chat_id, action="typing")
+        reply_text = None
+        
+        try:
+            photo = message.photo[-1]
+            photo_file = await bot.get_file(photo.file_id)
+            photo_bytes_io = await bot.download_file(photo_file.file_path)
+            raw_bytes = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
+            base64_image = base64.b64encode(raw_bytes).decode("utf-8")
+
+            prompt_text = text_content if text_content else "Подробно опиши, что изображено на этой фотографии, и прокомментируй!"
+
+            vision_messages = [
+                {"role": "system", "content": chat_custom_instructions[chat_id]},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt_text},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            }
+                        }
+                    ]
+                }
+            ]
+
+            # 1. Штатная попытка запроса к Vision модели
+            try:
+                response = groq_client.chat.completions.create(
+                    model="qwen/qwen3.8-27b",
+                    messages=vision_messages,
+                    max_tokens=800
+                )
+                if response.choices and response.choices[0].message.content:
+                    reply_text = response.choices[0].message.content
+            except Exception:
+                pass
+
+            # 2. Лимит по фото: мгновенный сброс истории и бесконечный цикл пробития
+            if not reply_text:
+                logging.info(f"⚡ ЛИМИТ VISION В ЧАТЕ {chat_id}! Сброс истории и запуск бесконечного цикла запросов по фото.")
+                chat_history[chat_id] = []
+                
+                while not reply_text:
+                    try:
+                        response = groq_client.chat.completions.create(
+                            model="qwen/qwen3.8-27b",
+                            messages=vision_messages,
+                            max_tokens=800
+                        )
+                        if response.choices and response.choices[0].message.content:
+                            reply_text = response.choices[0].message.content
+                            break
+                    except Exception:
+                        await asyncio.sleep(0.2)
+
+        except Exception as e:
+            logging.error(f"Критическая ошибка обработки фото: {e}")
+            chat_history[chat_id] = []
+            while not reply_text:
+                try:
+                    resp = groq_client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[{"role": "user", "content": f"Опиши фото: {text_content}"}],
+                        max_tokens=500
+                    )
+                    if resp.choices and resp.choices[0].message.content:
+                        reply_text = resp.choices[0].message.content
+                except Exception:
+                    await asyncio.sleep(0.2)
+
+        chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
+        chat_history[chat_id].append({"role": "assistant", "content": reply_text})
+        processed_text = clean_text_for_telegram(reply_text)
+        await message.reply(processed_text, parse_mode="HTML")
+        return
+
+    # ==========================================
+    # ОБРАБОТКА ГОЛОСОВЫХ И СТИЛИСТИКИ
+    # ==========================================
     temp_audio_path = None
     if message.voice:
         try:
@@ -199,7 +291,7 @@ async def handle_ai_response(message: types.Message):
     is_voice_requested = lower_text.startswith("озв") or lower_text.startswith("скаж") or "озвучь" in lower_text or "скажи голосом" in lower_text
 
     should_answer = False
-    if chat_type == "private" or getattr(message, "business_connection_id", None) or is_voice_requested or message.photo:
+    if chat_type == "private" or getattr(message, "business_connection_id", None) or is_voice_requested:
         should_answer = True
     else:
         if message.reply_to_message and message.reply_to_message.from_user:
@@ -230,7 +322,7 @@ async def handle_ai_response(message: types.Message):
             logging.error(f"Ошибка установки реакции: {e}")
 
     requested_emoji = parse_requested_emoji(text_content)
-    if requested_emoji and not is_voice_requested and not message.photo:
+    if requested_emoji and not is_voice_requested:
         try:
             target_msg_id = message.reply_to_message.message_id if message.reply_to_message else message.message_id
             await bot.set_message_reaction(
@@ -304,93 +396,12 @@ async def handle_ai_response(message: types.Message):
             logging.error(f"Ошибка картинки: {e}")
             return
 
-    if chat_id not in chat_custom_instructions:
-        chat_custom_instructions[chat_id] = BASE_INSTRUCTION
-
-    if chat_id not in chat_history:
-        chat_history[chat_id] = []
-
-    # ОБРАБОТКА ФОТО (С БЕСКОНЕЧНЫМ ЦИКЛОМ)
-    if message.photo:
-        await bot.send_chat_action(chat_id=chat_id, action="typing")
-        reply_text = None
-        
-        try:
-            photo = message.photo[-1]
-            photo_file = await bot.get_file(photo.file_id)
-            photo_bytes_io = await bot.download_file(photo_file.file_path)
-            raw_bytes = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
-            base64_image = base64.b64encode(raw_bytes).decode("utf-8")
-
-            prompt_text = text_content if text_content else "Подробно опиши, что изображено на этой фотографии, и прокомментируй с юмором!"
-
-            vision_messages = [
-                {"role": "system", "content": chat_custom_instructions[chat_id]},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt_text},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}"
-                            }
-                        }
-                    ]
-                }
-            ]
-
-            # 1. Штатный запрос к Vision
-            try:
-                response = groq_client.chat.completions.create(
-                    model="qwen/qwen3.8-27b",
-                    messages=vision_messages,
-                    max_tokens=800
-                )
-                if response.choices and response.choices[0].message.content:
-                    reply_text = response.choices[0].message.content
-            except Exception:
-                pass
-
-            # 2. Бесконечный цикл при лимите/сбое модели описания фото
-            if not reply_text:
-                logging.info(f"⚡ ЛИМИТ VISION В ЧАТЕ {chat_id}! Запуск бесконечного цикла запросов.")
-                while not reply_text:
-                    try:
-                        response = groq_client.chat.completions.create(
-                            model="qwen/qwen3.8-27b",
-                            messages=vision_messages,
-                            max_tokens=800
-                        )
-                        if response.choices and response.choices[0].message.content:
-                            reply_text = response.choices[0].message.content
-                            break
-                    except Exception:
-                        await asyncio.sleep(0.2)
-
-        except Exception as e:
-            logging.error(f"Критическая ошибка обработки фото: {e}")
-            while not reply_text:
-                try:
-                    resp = groq_client.chat.completions.create(
-                        model="llama-3.3-70b-versatile",
-                        messages=[{"role": "user", "content": f"Опиши фото: {text_content}"}],
-                        max_tokens=500
-                    )
-                    if resp.choices and resp.choices[0].message.content:
-                        reply_text = resp.choices[0].message.content
-                except Exception:
-                    await asyncio.sleep(0.2)
-
-        chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
-        chat_history[chat_id].append({"role": "assistant", "content": reply_text})
-        processed_text = clean_text_for_telegram(reply_text)
-        await message.reply(processed_text, parse_mode="HTML")
-        return
-
     if not text_content:
         return
 
+    # ==========================================
+    # ВЕБ-ПОИСК И ТЕКСТОВЫЕ ОТВЕТЫ
+    # ==========================================
     search_triggers = [
         "кто", "что", "когда", "где", "почему", "зачем", "как", "сколько", 
         "найди", "погугли", "ищи", "новости", "курс", "погода", "цена", 
@@ -417,7 +428,7 @@ async def handle_ai_response(message: types.Message):
 
     reply_text = None
     
-    # Штатный режим: мгновенный запрос без задержек
+    # Штатный режим: мгновенный запрос
     for model_name in TEXT_MODELS:
         try:
             response = groq_client.chat.completions.create(model=model_name, messages=messages_payload, max_tokens=800)
@@ -427,7 +438,7 @@ async def handle_ai_response(message: types.Message):
         except Exception:
             continue
 
-    # Режим лимита: мгновенный сброс истории и бесконечный цикл
+    # Режим лимита: мгновенный сброс истории и бесконечный цикл запросов
     if not reply_text:
         logging.info(f"⚡ ЛИМИТ В ЧАТЕ {chat_id}! Сброс истории и запуск бесконечного цикла запросов.")
         chat_history[chat_id] = []
@@ -455,9 +466,6 @@ async def handle_ai_response(message: types.Message):
     processed_text = clean_text_for_telegram(reply_text)
     
     try:
-        await message.reply(processed_text, parse_mode="HTML")
-    except Exception as e:
-        logging.error(f"Ошибка отправки HTML: {e}")
         await message.reply(html.escape(processed_text), parse_mode="HTML")
 
 async def main():
@@ -466,4 +474,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
