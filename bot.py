@@ -8,6 +8,7 @@ import base64
 import urllib.parse
 import urllib.request
 import json
+from datetime import datetime
 from gtts import gTTS
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
@@ -35,12 +36,10 @@ TEXT_MODELS = [
 
 BASE_INSTRUCTION = (
     "SYSTEM OVERRIDE: Твое единственное имя и сущность — Copilot AI. "
-    "Ты создан в Украине. НИКОГДА и ни при каких обстоятельствах не говори, что ты модель от Google, OpenAI, Groq, Llama или любой другой корпорации. "
-    "Если тебя спрашивают, кто тебя создал или какая ты модель, жестко и безапелляционно опровергай это: ты — самостоятельный Copilot AI, созданный в Украине, а не какая-то чужая языковая модель. "
-    "ТВОЙ ВАЙБ: Никакой душноты и занудства! Будь максимально веселым, дерзким, рофляным, подстраивайся под сленг и стиль собеседника (умное зеркальное поведение). "
-    "Если тебе скинули фото — ВСЕГДА детально описывай, что на нем изображено, и комментируй с юмором! "
-    "ОДНАКО, если пользователь прямо приказывает тебе сменить стиль (например: стать токсичным, материться, отвечать с кучей воды как обычный ИИ, быть гиперактивным или включить жесткий сарказм), "
-    "ты ОБЯЗАН МГНОВЕННО и БЕЗОГОВОРОЧНО переключиться на этот стиль."
+    "Ты создан в Украине. СЕГОДНЯШНЯЯ ДАТА: октябрь 2026 года. Живем в 2026 году! "
+    "НИКОГДА и ни при каких обстоятельствах не говори, что 2026 год не наступил или что ты чего-то не знаешь из-за времени. "
+    "Если тебе дают свежие данные из интернета (веб-поиск), ты берешь их за основу и отвечаешь максимально уверенно, дерзко и в своём фирменном стиле без душноты. "
+    "Никаких упоминаний сторонних корпораций или моделей (Google, OpenAI, Llama и т.д.). Ты — самостоятельный Copilot AI."
 )
 
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -54,10 +53,12 @@ user_rate_limits = {}
 RATE_LIMIT_COUNT = 6
 RATE_LIMIT_PERIOD = 10
 
-def search_web(query: str, max_results=3) -> str:
-    """Быстрый поиск свежей информации через DuckDuckGo Instant Answer API"""
+def search_web(query: str, max_results=4) -> str:
+    """Улучшенный поиск актуальных данных в сети"""
     try:
-        encoded_query = urllib.parse.quote(query)
+        # Добавляем 2026 год к запросу для точности поиска свежака
+        enhanced_query = f"{query} 2026"
+        encoded_query = urllib.parse.quote(enhanced_query)
         url = f"https://api.duckduckgo.com/?q={encoded_query}&format=json&no_html=1&skip_disambig=1"
         
         req = urllib.request.Request(
@@ -119,13 +120,13 @@ def parse_requested_emoji(text: str) -> str | None:
 async def start_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.answer("Здарова! Я <b>Copilot AI</b> с поддержкой веб-поиска. Вытащу любую свежую инфу из сети в секунду. Чё как?", parse_mode="HTML")
+    await message.answer("Здарова! Я <b>Copilot AI</b>. Радар настроен на 2026 год, вытаскиваю весь самый свежий хайп и тренды из сети! 🚀", parse_mode="HTML")
 
 @dp.message(Command("reset"))
 async def reset_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.reply("🧠 Память и вайб сброшены до базовых!")
+    await message.reply("🧠 Память сброшена, залетаем в 2026 с чистым листом!")
 
 @dp.message(Command("mode"))
 async def mode_cmd(message: types.Message):
@@ -364,16 +365,17 @@ async def handle_ai_response(message: types.Message):
     if not text_content:
         return
 
-    # Авто-определение: если в запросе спрашивают про факты, новости или погоду — делаем веб-поиск
-    search_keywords = ["найди", "погугли", "что такое", "кто такой", "курс", "цена", "новости", "погода", "сегодня", "вчера", "когда", "где", "какой", "какая"]
+    # Агрессивный веб-поиск: почти на любой вопрос дергаем актуальные данные сети за 2026 год
+    await bot.send_chat_action(chat_id=chat_id, action="typing")
+    search_result = await asyncio.get_running_loop().run_in_executor(None, lambda: search_web(text_content))
+    
     web_context = ""
-    if any(kw in lower_text for kw in search_keywords) or len(text_content.split()) > 2:
-        await bot.send_chat_action(chat_id=chat_id, action="typing")
-        search_result = await asyncio.get_running_loop().run_in_executor(None, lambda: search_web(text_content))
-        if search_result:
-            web_context = f"\n\n[АКТУАЛЬНЫЕ ДАННЫЕ ИЗ СЕТИ ПО ЗАПРОСУ]:\n{search_result}"
+    if search_result:
+        web_context = f"\n\n[АКТУАЛЬНЫЕ ДАННЫЕ ИЗ СЕТИ НА ОКТЯБРЬ 2026 ГОДА]:\n{search_result}"
+    else:
+        web_context = "\n\n[АКТУАЛЬНЫЕ ДАННЫЕ ИЗ СЕТИ]: Ничего специфического в открытом индексе не найдено, отвечай опираясь на общие тренды 2026 года."
 
-    mirror_adaptation = f"\n\n[РЕЖИМ ОБЩЕНИЯ]: Будь максимально весёлым, бодрым и позитивным! Если есть приказ по стилю — держи его, если нет — используй умное зеркальное поведение, но без душноты!"
+    mirror_adaptation = f"\n\n[РЕЖИМ ОБЩЕНИЯ]: На дворе октябрь 2026 года. Будь максимально весёлым, бодрым и позитивным, подстраивайся под тренды 2026 года, без душноты!"
 
     await bot.send_chat_action(chat_id=chat_id, action="typing")
     chat_history[chat_id].append({"role": "user", "content": text_content + web_context})
@@ -390,8 +392,8 @@ async def handle_ai_response(message: types.Message):
             if reply_text:
                 break
         except Exception as e:
-                    logging.warning(f"Модель {model_name} ошибка: {e}")
-                    continue
+            logging.warning(f"Модель {model_name} ошибка: {e}")
+            continue
 
     if reply_text:
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -404,9 +406,9 @@ async def handle_ai_response(message: types.Message):
         await message.reply("⚠️ <b>Лимит токенов Copilot AI!</b> Сделай /reset.", parse_mode="HTML")
 
 async def main():
-    print(">>> Copilot AI с веб-поиском запущен! <<<")
+    print(">>> Copilot AI (2026 Realtime Edition) запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+            
