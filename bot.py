@@ -111,6 +111,16 @@ def parse_requested_emoji(text: str) -> str | None:
     if "гнев" in lower or "злой" in lower or "💢" in lower: return "💢"
     return None
 
+def fetch_completion_sync(model_name, messages):
+    """Синхронный вызов Groq API для выполнения в отдельном потоке"""
+    try:
+        response = groq_client.chat.completions.create(model=model_name, messages=messages, max_tokens=800)
+        if response.choices and response.choices[0].message.content:
+            return response.choices[0].message.content
+    except Exception:
+        pass
+    return None
+
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
     chat_id = message.chat.id
@@ -191,50 +201,30 @@ async def handle_ai_response(message: types.Message):
                 }
             ]
 
-            # Штатный быстрый запрос по фото
-            try:
-                response = groq_client.chat.completions.create(
-                    model="qwen/qwen3.8-27b",
-                    messages=vision_messages,
-                    max_tokens=800
-                )
-                if response.choices and response.choices[0].message.content:
-                    reply_text = response.choices[0].message.content
-            except Exception:
-                pass
+            # Асинхронный быстрый запрос по фото без блокировки бота
+            reply_text = await asyncio.to_thread(fetch_completion_sync, "qwen/qwen3.8-27b", vision_messages)
 
-            # Лимит по фото: срабатывает ТОЛЬКО при реальной ошибке
+            # Если лимит — асинхронный бесконечный цикл пробития
             if not reply_text:
-                logging.info(f"⚡ РЕАЛЬНЫЙ ЛИМИТ VISION В ЧАТЕ {chat_id}! Сброс истории и запуск бесконечного цикла по фото.")
+                logging.info(f"⚡ РЕАЛЬНЫЙ ЛИМИТ VISION В ЧАТЕ {chat_id}! Сброс истории и запуск параллельного цикла.")
                 chat_history[chat_id] = []
                 
                 while not reply_text:
-                    try:
-                        response = groq_client.chat.completions.create(
-                            model="qwen/qwen3.8-27b",
-                            messages=vision_messages,
-                            max_tokens=800
-                        )
-                        if response.choices and response.choices[0].message.content:
-                            reply_text = response.choices[0].message.content
-                            break
-                    except Exception:
-                        await asyncio.sleep(0.2)
+                    reply_text = await asyncio.to_thread(fetch_completion_sync, "qwen/qwen3.8-27b", vision_messages)
+                    if not reply_text:
+                        await asyncio.sleep(0.5)
 
         except Exception as e:
             logging.error(f"Критическая ошибка обработки фото: {e}")
             chat_history[chat_id] = []
             while not reply_text:
-                try:
-                    resp = groq_client.chat.completions.create(
-                        model="llama-3.3-70b-versatile",
-                        messages=[{"role": "user", "content": f"Опиши фото: {text_content}"}],
-                        max_tokens=500
-                    )
-                    if resp.choices and resp.choices[0].message.content:
-                        reply_text = resp.choices[0].message.content
-                except Exception:
-                    await asyncio.sleep(0.2)
+                reply_text = await asyncio.to_thread(
+                    fetch_completion_sync, 
+                    "llama-3.3-70b-versatile", 
+                    [{"role": "user", "content": f"Опиши фото: {text_content}"}]
+                )
+                if not reply_text:
+                    await asyncio.sleep(0.5)
 
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -256,16 +246,16 @@ async def handle_ai_response(message: types.Message):
             with open(temp_audio_path, "wb") as f:
                 f.write(voice_bytes.read())
 
-            with open(temp_audio_path, "rb") as audio_file:
-                transcript_response = await asyncio.get_running_loop().run_in_executor(
-                    None,
-                    lambda: groq_client.audio.transcriptions.create(
+            def transcribe_voice():
+                with open(temp_audio_path, "rb") as audio_file:
+                    return groq_client.audio.transcriptions.create(
                         model="whisper-large-v3",
                         file=audio_file,
                         response_format="text",
                         language="ru"
                     )
-                )
+
+            transcript_response = await asyncio.to_thread(transcribe_voice)
             
             if temp_audio_path and os.path.exists(temp_audio_path):
                 os.remove(temp_audio_path)
@@ -373,16 +363,16 @@ async def handle_ai_response(message: types.Message):
         
         english_prompt = clean_prompt
         try:
-            translation_res = groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
+            translation_res = await asyncio.to_thread(
+                fetch_completion_sync,
+                "llama-3.3-70b-versatile",
+                [
                     {"role": "system", "content": "Translate the user query into a concise image generation prompt in English. Output ONLY English text."},
                     {"role": "user", "content": clean_prompt}
-                ],
-                max_tokens=100
+                ]
             )
-            if translation_res.choices and translation_res.choices[0].message.content:
-                english_prompt = translation_res.choices[0].message.content.strip()
+            if translation_res:
+                english_prompt = translation_res.strip()
         except Exception as e:
             logging.error(f"Ошибка перевода промпта: {e}")
 
@@ -414,7 +404,7 @@ async def handle_ai_response(message: types.Message):
     web_context = ""
     if (has_question_mark or has_search_keyword) and len(text_content.split()) >= 2:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
-        search_result = await asyncio.get_running_loop().run_in_executor(None, lambda: search_web_real(text_content))
+        search_result = await asyncio.to_thread(search_web_real, text_content)
         if search_result:
             web_context = f"\n\n[ДАННЫЕ ИЗ СЕТИ]:\n{search_result}"
 
@@ -428,19 +418,15 @@ async def handle_ai_response(message: types.Message):
 
     reply_text = None
     
-    # 1. Штатный режим (без лимитов): мгновенный единый запрос
-    try:
-        for model_name in TEXT_MODELS:
-            response = groq_client.chat.completions.create(model=model_name, messages=messages_payload, max_tokens=800)
-            if response.choices and response.choices[0].message.content:
-                reply_text = response.choices[0].message.content
-                break
-    except Exception:
-        pass
+    # 1. Штатный асинхронный быстый запрос
+    for model_name in TEXT_MODELS:
+        reply_text = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload)
+        if reply_text:
+            break
 
-    # 2. Режим лимита: срабатывает ТОЛЬКО при реальном сбое/лимите
+    # 2. Режим лимита: сброс истории и бесконечный параллельный цикл
     if not reply_text:
-        logging.info(f"⚡ РЕАЛЬНЫЙ ЛИМИТ В ЧАТЕ {chat_id}! Сброс истории и запуск бесконечного цикла пробития.")
+        logging.info(f"⚡ РЕАЛЬНЫЙ ЛИМИТ В ЧАТЕ {chat_id}! Сброс истории и запуск параллельного цикла пробития.")
         chat_history[chat_id] = []
         
         clean_payload = [
@@ -450,16 +436,12 @@ async def handle_ai_response(message: types.Message):
         
         while not reply_text:
             for model_name in TEXT_MODELS:
-                try:
-                    response = groq_client.chat.completions.create(model=model_name, messages=clean_payload, max_tokens=800)
-                    if response.choices and response.choices[0].message.content:
-                        reply_text = response.choices[0].message.content
-                        break
-                except Exception:
-                    continue
+                reply_text = await asyncio.to_thread(fetch_completion_sync, model_name, clean_payload)
+                if reply_text:
+                    break
             
             if not reply_text:
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(0.5)
 
     chat_history[chat_id].append({"role": "user", "content": text_content})
     chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -477,3 +459,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+                
