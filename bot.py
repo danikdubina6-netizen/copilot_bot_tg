@@ -191,6 +191,7 @@ async def handle_ai_response(message: types.Message):
                 }
             ]
 
+            # Штатный быстрый запрос по фото
             try:
                 response = groq_client.chat.completions.create(
                     model="qwen/qwen3.8-27b",
@@ -202,8 +203,9 @@ async def handle_ai_response(message: types.Message):
             except Exception:
                 pass
 
+            # Лимит по фото: срабатывает ТОЛЬКО при реальной ошибке
             if not reply_text:
-                logging.info(f"⚡ ЛИМИТ VISION В ЧАТЕ {chat_id}! Сброс истории и запуск бесконечного цикла по фото.")
+                logging.info(f"⚡ РЕАЛЬНЫЙ ЛИМИТ VISION В ЧАТЕ {chat_id}! Сброс истории и запуск бесконечного цикла по фото.")
                 chat_history[chat_id] = []
                 
                 while not reply_text:
@@ -426,17 +428,19 @@ async def handle_ai_response(message: types.Message):
 
     reply_text = None
     
-    for model_name in TEXT_MODELS:
-        try:
+    # 1. Штатный режим (без лимитов): мгновенный единый запрос
+    try:
+        for model_name in TEXT_MODELS:
             response = groq_client.chat.completions.create(model=model_name, messages=messages_payload, max_tokens=800)
             if response.choices and response.choices[0].message.content:
                 reply_text = response.choices[0].message.content
                 break
-        except Exception:
-            continue
+    except Exception:
+        pass
 
+    # 2. Режим лимита: срабатывает ТОЛЬКО при реальном сбое/лимите
     if not reply_text:
-        logging.info(f"⚡ ЛИМИТ В ЧАТЕ {chat_id}! Сброс истории и запуск бесконечного цикла запросов.")
+        logging.info(f"⚡ РЕАЛЬНЫЙ ЛИМИТ В ЧАТЕ {chat_id}! Сброс истории и запуск бесконечного цикла пробития.")
         chat_history[chat_id] = []
         
         clean_payload = [
