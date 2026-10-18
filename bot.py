@@ -468,7 +468,10 @@ async def process_user_message_async(message: types.Message):
     processed_text = clean_text_for_telegram(reply_text)
     
     try:
-        await message.reply(processed_text), parse_mode="HTML")
+        await message.reply(processed_text, parse_mode="HTML")
+    except Exception as e:
+        logging.error(f"Ошибка отправки HTML: {e}")
+        await message.reply(html.escape(processed_text), parse_mode="HTML")
 
 async def main():
     print(">>> Copilot AI запущен! <<<")
