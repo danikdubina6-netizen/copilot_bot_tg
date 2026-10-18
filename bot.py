@@ -277,10 +277,10 @@ async def process_user_message_async(message: types.Message):
 
     is_voice_requested = lower_text.startswith("озв") or lower_text.startswith("скаж") or "озвучь" in lower_text or "скажи голосом" in lower_text
 
-    should_answer = False
-    if chat_type == "private" or getattr(message, "business_connection_id", None) or is_voice_requested:
-        should_answer = True
-    else:
+    # В ЛИЧНЫХ СООБЩЕНИЯХ БОТ ОТВЕЧАЕТ ВСЕГДА И МГНОВЕННО БЕЗ ЛИШНИХ УСЛОВИЙ
+    should_answer = True
+    if chat_type != "private" and not getattr(message, "business_connection_id", None) and not is_voice_requested:
+        should_answer = False
         if message.reply_to_message and message.reply_to_message.from_user:
             if message.reply_to_message.from_user.id == (await bot.get_me()).id:
                 should_answer = True
@@ -414,15 +414,15 @@ async def process_user_message_async(message: types.Message):
 
     reply_text = None
     
-    # 1. ШТАТНЫЙ РЕЖИМ (БЕЗ ЛИМИТА): Мгновенный запрос с первой попытки за миллисекунды
+    # 1. ШТАТНЫЙ РЕЖИМ (БЕЗ ЛИМИТА): Мгновенный ответ за миллисекунды
     for model_name in TEXT_MODELS:
         reply_text = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload)
         if reply_text:
             break
 
-    # 2. РЕЖИМ ЛИМИТА: Мгновенный сброс истории в ноль и параллельный штурм по текущему сообщению за 5-12 секунд
+    # 2. РЕЖИМ ЛИМИТА: МГНОВЕННЫЙ СБРОС ИСТОРИИ И ПАРАЛЛЕЛЬНЫЙ ШТУРМ ЗА 5-12 СЕКУНД
     if not reply_text:
-        logging.info(f"⚡ РЕАЛЬНЫЙ ЛИМИТ В ЧАТЕ {chat_id}! Мгновенный сброс истории и штурм.")
+        logging.info(f"⚡ ЛИМИТ В ЧАТЕ {chat_id}! Сброс истории и штурм.")
         chat_history[chat_id] = []
         
         clean_payload = [
@@ -430,7 +430,6 @@ async def process_user_message_async(message: types.Message):
             {"role": "user", "content": text_content}
         ]
         
-        # Штурмуем обе модели одновременно с ограничением по времени (в пределах 5-12 секунд)
         for _ in range(15):
             tasks = [asyncio.to_thread(fetch_completion_sync, model_name, clean_payload) for model_name in TEXT_MODELS]
             results = await asyncio.gather(*tasks)
@@ -464,4 +463,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-            
+                        
