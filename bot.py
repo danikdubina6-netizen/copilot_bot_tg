@@ -50,7 +50,12 @@ chat_history = {}
 chat_custom_instructions = {}
 group_message_counters = {}
 
-user_rate_limits = {}
+# Время последнего взаимодействия для автоочистки каждые 6 часов
+chat_last_interaction = {}
+AUTO_CLEAR_HOURS = 6
+
+# Индивидуальный рейт-лимит строго по CHAT_ID
+chat_rate_limits = {}
 RATE_LIMIT_COUNT = 6
 RATE_LIMIT_PERIOD = 10
 
@@ -116,23 +121,29 @@ def parse_requested_emoji(text: str) -> str | None:
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
-    chat_history[message.chat.id] = []
-    chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
+    chat_id = message.chat.id
+    chat_history[chat_id] = []
+    chat_custom_instructions[chat_id] = BASE_INSTRUCTION
+    chat_last_interaction[chat_id] = time.time()
     await message.answer("Здарова! Я <b>Copilot AI</b>. Скучать точно не дам, разрываем этот чат без душноты. Чё как?", parse_mode="HTML")
 
 @dp.message(Command("reset"))
 async def reset_cmd(message: types.Message):
-    chat_history[message.chat.id] = []
-    chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
+    chat_id = message.chat.id
+    chat_history[chat_id] = []
+    chat_custom_instructions[chat_id] = BASE_INSTRUCTION
+    chat_last_interaction[chat_id] = time.time()
     await message.reply("🧠 Память и вайб сброшены до базовых!")
 
 @dp.message(Command("mode"))
 async def mode_cmd(message: types.Message):
+    chat_id = message.chat.id
     args = message.text.split(maxsplit=1)
     if len(args) > 1:
         new_persona = args[1]
-        chat_custom_instructions[message.chat.id] = f"{BASE_INSTRUCTION}\n\nПРИКАЗ ПО ПОВЕДЕНИЮ ОТ ПОЛЬЗОВАТЕЛЯ: {new_persona}"
-        chat_history[message.chat.id] = []
+        chat_custom_instructions[chat_id] = f"{BASE_INSTRUCTION}\n\nПРИКАЗ ПО ПОВЕДЕНИЮ ОТ ПОЛЬЗОВАТЕЛЯ: {new_persona}"
+        chat_history[chat_id] = []
+        chat_last_interaction[chat_id] = time.time()
         await message.reply(f"🎯 Поведение изменено: <b>{html.escape(new_persona)}</b>", parse_mode="HTML")
     else:
         await message.reply("⚠️ Укажи режим, например: <code>/mode Будь дерзким</code>", parse_mode="HTML")
@@ -141,8 +152,15 @@ async def mode_cmd(message: types.Message):
 async def handle_ai_response(message: types.Message):
     chat_id = message.chat.id
     chat_type = message.chat.type
-    user_id = message.from_user.id if message.from_user else chat_id
     text_content = message.text or message.caption or ""
+    now = time.time()
+
+    # Автоочистка истории чата если прошло больше 6 часов
+    if chat_id in chat_last_interaction:
+        if now - chat_last_interaction[chat_id] > (AUTO_CLEAR_HOURS * 3600):
+            chat_history[chat_id] = []
+            chat_custom_instructions[chat_id] = BASE_INSTRUCTION
+    chat_last_interaction[chat_id] = now
 
     temp_audio_path = None
     if message.voice:
@@ -189,18 +207,18 @@ async def handle_ai_response(message: types.Message):
 
     is_voice_requested = lower_text.startswith("озв") or lower_text.startswith("скаж") or "озвучь" in lower_text or "скажи голосом" in lower_text
 
+    # Индивидуальный рейт-лимит строго по chat_id
     if chat_type == "private":
-        now = time.time()
-        if user_id not in user_rate_limits:
-            user_rate_limits[user_id] = []
+        if chat_id not in chat_rate_limits:
+            chat_rate_limits[chat_id] = []
         
-        user_rate_limits[user_id] = [t for t in user_rate_limits[user_id] if now - t < RATE_LIMIT_PERIOD]
+        chat_rate_limits[chat_id] = [t for t in chat_rate_limits[chat_id] if now - t < RATE_LIMIT_PERIOD]
         
-        if len(user_rate_limits[user_id]) >= RATE_LIMIT_COUNT:
-            await message.reply("⚠️ <b>Порожняк не гони, тормози!</b> Слишком часто пишешь в личку, дай передохнуть.", parse_mode="HTML")
+        if len(chat_rate_limits[chat_id]) >= RATE_LIMIT_COUNT:
+            await message.reply("⚠️ <b>Порожняк не гони, тормози!</b> Слишком часто пишешь, дай передохнуть пару секунд.", parse_mode="HTML")
             return
             
-        user_rate_limits[user_id].append(now)
+        chat_rate_limits[chat_id].append(now)
 
     should_answer = False
     if chat_type == "private" or getattr(message, "business_connection_id", None) or is_voice_requested or message.photo:
@@ -364,19 +382,17 @@ async def handle_ai_response(message: types.Message):
     if not text_content:
         return
 
-    # УМНАЯ ПРОВЕРКА: Искать в инете ТОЛЬКО если есть явный вопрос или ключевые поисковые слова
+    # Поиск только при явных вопросах или ключевых словах
     search_triggers = [
         "кто", "что", "когда", "где", "почему", "зачем", "как", "сколько", 
         "найди", "погугли", "ищи", "новости", "курс", "погода", "цена", 
         "2026", "состав", "альбом", "трек", "песня", "фильм", "актер"
     ]
     
-    # Флаг наличия знака вопроса или поискового ключевика
     has_question_mark = "?" in text_content
     has_search_keyword = any(re.search(rf'\b{re.escape(trig)}\b', lower_text) for trig in search_triggers)
     
     web_context = ""
-    # Не ищем на короткие бытовые фразы (типа "круто", "понял", "ку" и т.д. без вопросов)
     if (has_question_mark or has_search_keyword) and len(text_content.split()) >= 2:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         search_result = await asyncio.get_running_loop().run_in_executor(None, lambda: search_web_real(text_content))
@@ -400,18 +416,35 @@ async def handle_ai_response(message: types.Message):
             if reply_text:
                 break
         except Exception as e:
-            logging.warning(f"Модель {model_name} ошибка: {e}")
+            logging.warning(f"Модель {model_name} на модели {model_name} словила лимит/ошибку: {e}")
             continue
 
-    if reply_text:
-        chat_history[chat_id].append({"role": "assistant", "content": reply_text})
-        processed_text = clean_text_for_telegram(reply_text)
-        try:
-            await message.reply(processed_text, parse_mode="HTML")
-        except Exception:
-            await message.reply(html.escape(processed_text), parse_mode="HTML")
-    else:
-        await message.reply("⚠️ <b>Лимит токенов Copilot AI!</b> Сделай /reset.", parse_mode="HTML")
+    # ЕСЛИ СЛОВИЛИ ЛИМИТ / ОШИБКУ ТОКЕНОВ: молча чистим историю и пробуем ответить свежим запросом без старого контекста
+    if not reply_text:
+        logging.info(f"🔄 Сработал лимит API в чате {chat_id}. Выполняем бесшумный автосброс истории и повторный запрос.")
+        chat_history[chat_id] = [{"role": "user", "content": text_content}]
+        messages_payload = [{"role": "system", "content": chat_custom_instructions[chat_id] + mirror_adaptation}, chat_history[chat_id][-1]]
+        
+        for model_name in TEXT_MODELS:
+            try:
+                response = groq_client.chat.completions.create(model=model_name, messages=messages_payload, max_tokens=800)
+                reply_text = response.choices[0].message.content
+                if reply_text:
+                    break
+            except Exception:
+                continue
+
+    # Если даже после сброса апишка лежит — выдаем короткую нейтральную фразу вместо ошибок
+    if not reply_text:
+        chat_history[chat_id] = []
+        reply_text = "На связи! Продолжаем разговор 🚀"
+
+    chat_history[chat_id].append({"role": "assistant", "content": reply_text})
+    processed_text = clean_text_for_telegram(reply_text)
+    try:
+        await message.reply(processed_text, parse_mode="HTML")
+    except Exception:
+        await message.reply(html.escape(processed_text), parse_mode="HTML")
 
 async def main():
     print(">>> Copilot AI запущен! <<<")
@@ -419,4 +452,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
