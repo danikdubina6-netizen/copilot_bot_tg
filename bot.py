@@ -34,11 +34,14 @@ TEXT_MODELS = [
 ]
 
 BASE_INSTRUCTION = (
-    "Ты — Copilot AI. Сегодня октябрь 2026 года. "
+    "Ты — Copilot AI. На дворе ОКТЯБРЬ 2026 ГОДА. "
+    "СТРОЖАЙШИЙ ЗАПРЕТ: Категорически запрещено писать фразы 'на момент обновления базы знаний', "
+    "'по состоянию на 2023 год', 'мои знания ограничены', 'я лишь ИИ' и любые подобные отмазки! "
+    "Если в сообщении передан [ДАННЫЕ ИЗ СЕТИ (2026)], используй их как свежайшие факты прямо из интернета. "
     "ЯЗЫК: Отвечай ИСКЛЮЧИТЕЛЬНО НА РУССКОМ ЯЗЫКЕ! Никакого украинского или английского текста. "
     "ОБЩЕНИЕ: Отвечай живым языком, подстраивайся под сленг и вайб собеседника, не душни. "
-    "ФАКТЫ: Не выдумывай несуществующие факты. Используй поиск, если он передан. "
-    "СМЕНА СТИЛЯ: Если пользователь просит сменить стиль (токсичный, маты и т.д.) — исполняй строго и безоговорочно. "
+    "ФАКТЫ: Не выдумывай несуществующие факты. "
+    "СМЕНА СТИЛЯ: Если пользователь просит сменить стиль — исполняй строго и безоговорочно. "
     "Никогда не упоминай сторонние компании или нейросети (Google, OpenAI и др.)."
 )
 
@@ -51,33 +54,35 @@ group_message_counters = {}
 chat_last_interaction = {}
 AUTO_CLEAR_HOURS = 6
 
-def search_web_real_sync(query: str, max_results=3) -> str:
-    """Безопасный синхронный веб-поиск для выноса в поток"""
+def search_web_real_sync(query: str, max_results=4) -> str:
+    """Умный веб-поиск: извлекает ключевые факты и свежие новости из интернета"""
     try:
-        encoded_query = urllib.parse.quote(query)
+        # Формируем очищенный поисковый запрос
+        clean_query = re.sub(r'[^\w\s]', '', query).strip()
+        encoded_query = urllib.parse.quote(clean_query)
         url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
         
         req = urllib.request.Request(
             url, 
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
         )
         
-        with urllib.request.urlopen(req, timeout=2) as response:
+        with urllib.request.urlopen(req, timeout=3) as response:
             html_content = response.read().decode('utf-8', errors='ignore')
             soup = BeautifulSoup(html_content, 'html.parser')
             
             snippets = []
             for result in soup.find_all('a', class_='result__snippet'):
                 text = result.get_text(strip=True)
-                if text and len(text) > 15:
+                if text and len(text) > 20:
                     snippets.append(text)
                 if len(snippets) >= max_results:
                     break
                     
             if snippets:
-                return "\n---\n".join(snippets)
+                return "\n• " + "\n• ".join(snippets)
     except Exception as e:
-        logging.warning(f"Поиск пропущен: {e}")
+        logging.warning(f"Умный поиск пропущен или недоступен: {e}")
     return ""
 
 def clean_text_for_telegram(text: str) -> str:
@@ -389,19 +394,19 @@ async def process_user_message_async(message: types.Message):
     search_triggers = [
         "кто", "что", "когда", "где", "почему", "зачем", "как", "сколько", 
         "найди", "погугли", "ищи", "новости", "курс", "погода", "цена", 
-        "2026", "состав", "альбом", "трек", "песня", "фильм", "актер"
+        "2026", "2025", "2024", "состав", "альбом", "трек", "песня", "фильм", "актер"
     ]
     
     has_question_mark = "?" in text_content
     has_search_keyword = any(re.search(rf'\b{re.escape(trig)}\b', lower_text) for trig in search_triggers)
     
     web_context = ""
-    if (has_question_mark or has_search_keyword) and len(text_content.split()) >= 2:
+    # Если запрашивается фактология или свежие события — асинхронно цепляем интернет
+    if (has_question_mark or has_search_keyword or len(text_content.split()) >= 3):
         await bot.send_chat_action(chat_id=chat_id, action="typing")
-        # Выносим синхронный поиск в отдельный поток, чтобы не морозить группы!
         search_result = await asyncio.to_thread(search_web_real_sync, text_content)
         if search_result:
-            web_context = f"\n\n[ДАННЫЕ ИЗ СЕТИ]:\n{search_result}"
+            web_context = f"\n\n[ДАННЫЕ ИЗ СЕТИ (2026)]:\n{search_result}"
 
     await bot.send_chat_action(chat_id=chat_id, action="typing")
     
@@ -426,7 +431,7 @@ async def process_user_message_async(message: types.Message):
         
         clean_payload = [
             {"role": "system", "content": chat_custom_instructions[chat_id]},
-            {"role": "user", "content": text_content}
+            {"role": "user", "content": text_content + web_context}
         ]
         
         while not reply_text:
@@ -459,4 +464,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-                            
+            
