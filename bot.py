@@ -34,8 +34,9 @@ TEXT_MODELS = [
 ]
 
 BASE_INSTRUCTION = (
-    "Ты — Copilot AI, умный ассистент из Украины. Сегодня октябрь 2026 года. "
-    "ОБЩЕНИЕ: Отвечай живым языком, будь умным, подстраивайся под стиль собеседника. Зеркаль его вайб и сленг, не душни. "
+    "Ты — Copilot AI. Сегодня октябрь 2026 года. "
+    "ЯЗЫК: Отвечай ИСКЛЮЧИТЕЛЬНО НА РУССКОМ ЯЗЫКЕ! Никакого украинского или английского текста в ответах. "
+    "ОБЩЕНИЕ: Отвечай живым, понятным языком, подстраивайся под стиль собеседника. Зеркаль его вайб и сленг, без душноты и занудства. "
     "ФАКТЫ: Не выдумывай несуществующие альбомы, песни, даты и факты. Если тебе даны данные из поиска — используй их точно. "
     "СМЕНА СТИЛЯ: Если пользователь прямо просит сменить стиль (например: быть токсичным, материться, быть формальным) — исполняй строго и безоговорочно. "
     "Никогда не упоминай другие компании или нейросети (Google, OpenAI и т.д.)."
@@ -146,7 +147,7 @@ async def handle_ai_response(message: types.Message):
     text_content = message.text or message.caption or ""
     now = time.time()
 
-    # Очистка если не писали 6 часов
+    # Очистка контекста если не писали более 6 часов
     if chat_id in chat_last_interaction:
         if now - chat_last_interaction[chat_id] > (AUTO_CLEAR_HOURS * 3600):
             chat_history[chat_id] = []
@@ -378,6 +379,8 @@ async def handle_ai_response(message: types.Message):
             web_context = f"\n\n[ДАННЫЕ ИЗ СЕТИ]:\n{search_result}"
 
     await bot.send_chat_action(chat_id=chat_id, action="typing")
+    
+    # Добавляем сообщение пользователя в историю
     chat_history[chat_id].append({"role": "user", "content": text_content + web_context})
     if len(chat_history[chat_id]) > 6:
         chat_history[chat_id] = chat_history[chat_id][-6:]
@@ -386,7 +389,7 @@ async def handle_ai_response(message: types.Message):
 
     reply_text = None
     
-    # 1. Запрос к нейросети
+    # ПОПЫТКА 1: Генерация ответа через основной контекст
     for model_name in TEXT_MODELS:
         try:
             response = groq_client.chat.completions.create(model=model_name, messages=messages_payload, max_tokens=1000)
@@ -394,30 +397,33 @@ async def handle_ai_response(message: types.Message):
                 reply_text = response.choices[0].message.content
                 break
         except Exception as e:
-            logging.warning(f"Ошибка {model_name}: {e}")
+            logging.warning(f"Сбой модели {model_name}: {e}")
             continue
 
-    # 2. Если словился сбой API — молча чистим историю и делаем чистый запрос без истории
+    # ПОПЫТКА 2 (ЕСЛИ ЛИМИТ/ОШИБКА): Мгновенно стираем историю и генерируем ответ НА ЭТО ЖЕ СООБЩЕНИЕ!
     if not reply_text:
-        logging.info(f"🔄 Сброс контекста в чате {chat_id}")
+        logging.info(f"🔄 ЛИМИТ/СБОЙ В ЧАТЕ {chat_id}: Автоматически очищаем историю и отвечаем на последнее сообщение!")
+        
+        # Полностью очищаем историю диалога
         chat_history[chat_id] = []
         
+        # Создаем чистый запрос ТОЛЬКО с текущим сообщением пользователя
         fresh_payload = [
             {"role": "system", "content": chat_custom_instructions[chat_id]},
-            {"role": "user", "content": text_content}
+            {"role": "user", "content": text_content + web_context}
         ]
         
         for model_name in TEXT_MODELS:
             try:
-                response = groq_client.chat.completions.create(model=model_name, messages=fresh_payload, max_tokens=500)
+                response = groq_client.chat.completions.create(model=model_name, messages=fresh_payload, max_tokens=800)
                 if response.choices and response.choices[0].message.content:
                     reply_text = response.choices[0].message.content
                     break
             except Exception as e:
-                logging.error(f"Ошибка аварийной генерации на {model_name}: {e}")
+                logging.error(f"Повторная генерация на {model_name} выдала ошибку: {e}")
                 continue
 
-    # Если ответ получен — заносим в историю и отправляем
+    # Сохраняем сформированный ответ ИИ в историю и отправляем пользователю
     if reply_text:
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
         processed_text = clean_text_for_telegram(reply_text)
@@ -427,9 +433,9 @@ async def handle_ai_response(message: types.Message):
             await message.reply(html.escape(processed_text), parse_mode="HTML")
 
 async def main():
-    print(">>> Copilot AI (Pure Intelligence) запущен! <<<")
+    print(">>> Copilot AI запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-                                                         
+                
