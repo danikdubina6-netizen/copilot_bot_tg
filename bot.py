@@ -41,6 +41,7 @@ BASE_INSTRUCTION = (
     "СТРОЖАЙШИЙ ЗАПРЕТ: Категорически запрещено писать фразы 'на момент обновления базы знаний', "
     "'по состоянию на 2023 год', 'мои знания ограничены', 'я лишь ИИ' и любые подобные отмазки! "
     "Если в сообщении передан [ДАННЫЕ ИЗ СЕТИ (2026)], используй их как свежайшие факты прямо из интернета. "
+    "ПРАВИЛО КОНЦОВКИ: Всегда рассчитывай объем ответа так, чтобы полностью завершить мысль, предложение и абзац. Категорически запрещено обрывать текст на полуслове — если видишь, что лимит подходит к концу, кратко резюмируй мысль и поставь точку! "
     "ЯЗЫК: Отвечай ИСКЛЮЧИТЕЛЬНО НА РУССКОМ ЯЗЫКЕ! Никакого украинского или английского текста. "
     "ОБЩЕНИЕ: Отвечай живым языком, подстраивайся под сленг и вайб собеседника, не душни. "
     "ФАКТЫ: Не выдумывай несуществующие факты. "
@@ -120,7 +121,8 @@ def parse_requested_emoji(text: str) -> str | None:
 
 def fetch_completion_sync(model_name, messages):
     try:
-        response = groq_client.chat.completions.create(model=model_name, messages=messages, max_tokens=800)
+        # Оптимальный лимит 1000 токенов с контролем завершенности
+        response = groq_client.chat.completions.create(model=model_name, messages=messages, max_tokens=1000)
         if response.choices and response.choices[0].message.content:
             return response.choices[0].message.content
     except Exception:
@@ -465,4 +467,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
