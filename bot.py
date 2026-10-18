@@ -28,7 +28,7 @@ if GROQ_API_KEY:
 
 BOT_USERNAME = "Copilot_AI2026_bot"
 
-# Штурмовой пул из 4 моделей для молниеносного пробития лимитов
+# Штурмовой пул из 4 моделей
 TEXT_MODELS = [
     "llama-3.3-70b-versatile",
     "qwen/qwen3.8-27b",
@@ -429,9 +429,9 @@ async def process_user_message_async(message: types.Message):
         if reply_text:
             break
 
-    # 2. РЕЖИМ ЛИМИТА: МГНОВЕННЫЙ СБРОС ИСТОРИИ И БЕСКОНЕЧНЫЙ ШТУРМ ПО 4 МОДЕЛЯМ БЕЗ ПАУЗ
+    # 2. РЕЖИМ ЛИМИТА: БЕСКОНЕЧНЫЙ ПАРАЛЛЕЛЬНЫЙ ШТУРМ ПО ВСЕМ МОДЕЛЯМ БЕЗ ПАУЗ ДО ПОБЕДЫ
     if not reply_text:
-        logging.info(f"⚡ РЕАЛЬНЫЙ ЛИМИТ В ЧАТЕ {chat_id}! Сброс истории и безумный штурм.")
+        logging.info(f"⚡ ЛИМИТ/СБОЙ В ЧАТЕ {chat_id}! Запускаем бесконечный штурм всех серверов.")
         chat_history[chat_id] = []
         
         clean_payload = [
