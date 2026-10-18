@@ -188,11 +188,12 @@ async def process_user_message_async(message: types.Message):
         chat_history[chat_id] = []
 
     # ==========================================
-    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО (VISION ШТУРМ)
+    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО (МОЛНИЕНОСНЫЙ ПАРАЛЛЕЛЬНЫЙ ШТУРМ VISION)
     # ==========================================
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         reply_text = None
+        error_log = ""
         
         try:
             photo = message.photo[-1]
@@ -220,18 +221,25 @@ async def process_user_message_async(message: types.Message):
             ]
 
             while not reply_text:
-                for model_name in VISION_MODELS:
-                    reply_text = await asyncio.to_thread(fetch_completion_sync, model_name, vision_messages)
-                    if reply_text:
+                tasks = [asyncio.to_thread(fetch_completion_sync, model_name, vision_messages) for model_name in VISION_MODELS]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                for res in results:
+                    if isinstance(res, str) and res:
+                        reply_text = res
                         break
+                
                 if reply_text:
                     break
-                await asyncio.sleep(1)
+                
+                await asyncio.sleep(0)
 
         except Exception as e:
+            error_log = str(e)
             logging.error(f"Критическая ошибка загрузки фото: {e}")
 
-        final_reply = reply_text or "Не удалось обработать картинку через серверы."
+        final_reply = reply_text if reply_text else f"❌ ВСЕ VISION МОДЕЛИ УПАЛИ: {error_log}"
+        
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
         chat_history[chat_id].append({"role": "assistant", "content": final_reply})
         processed_text = clean_text_for_telegram(final_reply)
@@ -460,10 +468,7 @@ async def process_user_message_async(message: types.Message):
     processed_text = clean_text_for_telegram(reply_text)
     
     try:
-        await message.reply(processed_text, parse_mode="HTML")
-    except Exception as e:
-        logging.error(f"Ошибка отправки HTML: {e}")
-        await message.reply(html.escape(processed_text), parse_mode="HTML")
+        await message.reply(processed_text), parse_mode="HTML")
 
 async def main():
     print(">>> Copilot AI запущен! <<<")
