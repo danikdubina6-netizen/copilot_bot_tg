@@ -5,6 +5,8 @@ import random
 import re
 import html
 import base64
+import io
+from PIL import Image
 import urllib.parse
 import urllib.request
 from bs4 import BeautifulSoup
@@ -36,7 +38,7 @@ TEXT_MODELS = [
     "openai/gpt-oss-20b"
 ]
 
-# Рабочая мультимодальная модель для картинок
+# Пул моделей для картинок
 VISION_MODELS = [
     "qwen/qwen3.8-27b"
 ]
@@ -187,19 +189,25 @@ async def process_user_message_async(message: types.Message):
         chat_history[chat_id] = []
 
     # ==========================================
-    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО (ЧЕРЕЗ QWEN)
+    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО (СЖАТИЕ И АВТОПОВТОР)
     # ==========================================
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         reply_text = None
-        error_logs = []
         
         try:
             photo = message.photo[-1]
             photo_file = await bot.get_file(photo.file_id)
             photo_bytes_io = await bot.download_file(photo_file.file_path)
-            raw_bytes = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
-            base64_image = base64.b64encode(raw_bytes).decode("utf-8")
+            
+            raw_data = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
+            
+            # Сжимаем фото через PIL до 800х800, чтобы не тратить лимит TPD
+            image = Image.open(io.BytesIO(raw_data))
+            image.thumbnail((800, 800))
+            buffer = io.BytesIO()
+            image.save(buffer, format="JPEG", quality=75)
+            base64_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
             prompt_text = text_content if text_content else "Опиши, что на этой картинке, и прокомментируй."
 
@@ -219,23 +227,24 @@ async def process_user_message_async(message: types.Message):
                 }
             ]
 
-            # Штурмуем через Qwen с лимитом в 600 токенов (экономим суточный TPD)
-            tasks = [asyncio.to_thread(fetch_completion_sync, model_name, vision_messages, 600) for model_name in VISION_MODELS]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            for res in results:
-                if isinstance(res, str):
-                    if res.startswith("ERR_API"):
-                        error_logs.append(res)
-                    elif res.strip():
+            # Цикл автоповтора при лимитах (ждём и штурмуем снова)
+            while not reply_text:
+                for model_name in VISION_MODELS:
+                    res = await asyncio.to_thread(fetch_completion_sync, model_name, vision_messages, 500)
+                    if res and not res.startswith("ERR_API"):
                         reply_text = res
                         break
+                
+                if reply_text:
+                    break
+                
+                # Если упёрлись в лимит, ждем 5 секунд и повторяем попытку
+                await asyncio.sleep(5)
 
         except Exception as e:
-            error_logs.append(f"Global Photo Error: {e}")
             logging.error(f"Критическая ошибка загрузки фото: {e}")
 
-        final_reply = reply_text if reply_text else ("❌ СБОЙ VISION МОДЕЛИ:\n" + "\n".join(error_logs))
+        final_reply = reply_text or "Не удалось обработать картинку из-за лимитов."
         
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
         chat_history[chat_id].append({"role": "assistant", "content": final_reply})
