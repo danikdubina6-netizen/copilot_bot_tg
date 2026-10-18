@@ -206,27 +206,33 @@ async def process_user_message_async(message: types.Message):
             reply_text = await asyncio.to_thread(fetch_completion_sync, "qwen/qwen3.8-27b", vision_messages)
 
             if not reply_text:
-                logging.info(f"⚡ БЫСТРЫЙ ПРОБОЙ VISION В ЧАТЕ {chat_id}! Сброс истории.")
+                logging.info(f"⚡ МГНОВЕННЫЙ СБРОС И ШТУРМ VISION В ЧАТЕ {chat_id}!")
                 chat_history[chat_id] = []
                 
                 while not reply_text:
-                    reply_text = await asyncio.to_thread(fetch_completion_sync, "qwen/qwen3.8-27b", vision_messages)
+                    tasks = [asyncio.to_thread(fetch_completion_sync, model_name, vision_messages) for model_name in TEXT_MODELS]
+                    results = await asyncio.gather(*tasks)
+                    for res in results:
+                        if res:
+                            reply_text = res
+                            break
                     if reply_text:
                         break
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.2)
 
         except Exception as e:
             logging.error(f"Критическая ошибка обработки фото: {e}")
             chat_history[chat_id] = []
             while not reply_text:
-                reply_text = await asyncio.to_thread(
-                    fetch_completion_sync, 
-                    "llama-3.3-70b-versatile", 
-                    [{"role": "user", "content": f"Опиши фото: {text_content}"}]
-                )
+                tasks = [asyncio.to_thread(fetch_completion_sync, model_name, vision_messages) for model_name in TEXT_MODELS]
+                results = await asyncio.gather(*tasks)
+                for res in results:
+                    if res:
+                        reply_text = res
+                        break
                 if reply_text:
                     break
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.2)
 
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -425,11 +431,12 @@ async def process_user_message_async(message: types.Message):
         if reply_text:
             break
 
-    # 2. Режим лимита: СБРОС ИСТОРИИ И ПАРАЛЛЕЛЬНЫЙ ШТУРМ ОБЕИХ МОДЕЛЕЙ СРАЗУ (5-12 СЕКУНД)
+    # 2. РЕЖИМ ЛИМИТА: МГНОВЕННЫЙ СБРОС ИСТОРИИ И ПАРАЛЛЕЛЬНЫЙ ШТУРМ ПОСЛЕДНЕГО СООБЩЕНИЯ
     if not reply_text:
-        logging.info(f"⚡ СУПЕР-ПРОБОЙ ЛИМИТА В ЧАТЕ {chat_id}! Параллельный опрос моделей.")
+        logging.info(f"⚡ ЛИМИТ В ЧАТЕ {chat_id}! Мгновенный сброс истории и параллельный штурм запроса.")
         chat_history[chat_id] = []
         
+        # Сбрасываем историю на ноль и долбим исключительно текущее сообщение пользователя
         clean_payload = [
             {"role": "system", "content": chat_custom_instructions[chat_id]},
             {"role": "user", "content": text_content}
@@ -447,7 +454,7 @@ async def process_user_message_async(message: types.Message):
             if reply_text:
                 break
             
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.2)
 
     chat_history[chat_id].append({"role": "user", "content": text_content})
     chat_history[chat_id].append({"role": "assistant", "content": reply_text})
