@@ -28,9 +28,12 @@ if GROQ_API_KEY:
 
 BOT_USERNAME = "Copilot_AI2026_bot"
 
+# Полный штурмовой пул моделей (4 модели для молниеносного пробития лимитов)
 TEXT_MODELS = [
     "llama-3.3-70b-versatile",
-    "qwen/qwen3.8-27b"
+    "qwen/qwen3.8-27b",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b"
 ]
 
 BASE_INSTRUCTION = (
@@ -57,7 +60,6 @@ AUTO_CLEAR_HOURS = 6
 def search_web_real_sync(query: str, max_results=4) -> str:
     """Умный веб-поиск: извлекает ключевые факты и свежие новости из интернета"""
     try:
-        # Формируем очищенный поисковый запрос
         clean_query = re.sub(r'[^\w\s]', '', query).strip()
         encoded_query = urllib.parse.quote(clean_query)
         url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
@@ -401,7 +403,6 @@ async def process_user_message_async(message: types.Message):
     has_search_keyword = any(re.search(rf'\b{re.escape(trig)}\b', lower_text) for trig in search_triggers)
     
     web_context = ""
-    # Если запрашивается фактология или свежие события — асинхронно цепляем интернет
     if (has_question_mark or has_search_keyword or len(text_content.split()) >= 3):
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         search_result = await asyncio.to_thread(search_web_real_sync, text_content)
@@ -424,7 +425,7 @@ async def process_user_message_async(message: types.Message):
         if reply_text:
             break
 
-    # 2. РЕЖИМ ЛИМИТА: МГНОВЕННЫЙ СБРОС ИСТОРИИ И БЕСКОНЕЧНЫЙ ШТУРМ БЕЗ ПАУЗ ДО ПОБЕДНОГО
+    # 2. РЕЖИМ ЛИМИТА: МГНОВЕННЫЙ СБРОС ИСТОРИИ И БЕСКОНЕЧНЫЙ ШТУРМ ПО ВСЕМ МОДЕЛЯМ БЕЗ ПАУЗ
     if not reply_text:
         logging.info(f"⚡ РЕАЛЬНЫЙ ЛИМИТ В ЧАТЕ {chat_id}! Сброс истории и безумный штурм.")
         chat_history[chat_id] = []
@@ -464,4 +465,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-            
+    
