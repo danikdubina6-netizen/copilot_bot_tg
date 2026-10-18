@@ -151,7 +151,6 @@ async def mode_cmd(message: types.Message):
 
 @dp.message()
 async def handle_ai_response(message: types.Message):
-    # Запускаем обработку каждого сообщения в отдельной фоновой таске, чтобы они не ждали друг друга
     asyncio.create_task(process_user_message_async(message))
 
 async def process_user_message_async(message: types.Message):
@@ -206,14 +205,15 @@ async def process_user_message_async(message: types.Message):
 
             reply_text = await asyncio.to_thread(fetch_completion_sync, "qwen/qwen3.8-27b", vision_messages)
 
-            # Бесконечный пробой без пауз для фото
             if not reply_text:
-                logging.info(f"⚡ МОЛНИЕНОСНЫЙ ПРОБОЙ VISION В ЧАТЕ {chat_id}! Сброс истории.")
+                logging.info(f"⚡ БЫСТРЫЙ ПРОБОЙ VISION В ЧАТЕ {chat_id}! Сброс истории.")
                 chat_history[chat_id] = []
                 
                 while not reply_text:
                     reply_text = await asyncio.to_thread(fetch_completion_sync, "qwen/qwen3.8-27b", vision_messages)
-                    await asyncio.sleep(0)
+                    if reply_text:
+                        break
+                    await asyncio.sleep(0.5)
 
         except Exception as e:
             logging.error(f"Критическая ошибка обработки фото: {e}")
@@ -224,7 +224,9 @@ async def process_user_message_async(message: types.Message):
                     "llama-3.3-70b-versatile", 
                     [{"role": "user", "content": f"Опиши фото: {text_content}"}]
                 )
-                await asyncio.sleep(0)
+                if reply_text:
+                    break
+                await asyncio.sleep(0.5)
 
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -423,9 +425,9 @@ async def process_user_message_async(message: types.Message):
         if reply_text:
             break
 
-    # 2. Режим лимита: СБРОС ИСТОРИИ И МОЛНИЕНОСНЫЙ БЕСКОНЕЧНЫЙ ЦИКЛ БЕЗ SLEEP
+    # 2. Режим лимита: СБРОС ИСТОРИИ И ПАРАЛЛЕЛЬНЫЙ ШТУРМ ОБЕИХ МОДЕЛЕЙ СРАЗУ (5-12 СЕКУНД)
     if not reply_text:
-        logging.info(f"⚡ МОЛНИЕНОСНЫЙ ПРОБОЙ ЛИМИТА В ЧАТЕ {chat_id}! Сброс истории и безумный цикл.")
+        logging.info(f"⚡ СУПЕР-ПРОБОЙ ЛИМИТА В ЧАТЕ {chat_id}! Параллельный опрос моделей.")
         chat_history[chat_id] = []
         
         clean_payload = [
@@ -434,13 +436,18 @@ async def process_user_message_async(message: types.Message):
         ]
         
         while not reply_text:
-            for model_name in TEXT_MODELS:
-                reply_text = await asyncio.to_thread(fetch_completion_sync, model_name, clean_payload)
-                if reply_text:
+            tasks = [asyncio.to_thread(fetch_completion_sync, model_name, clean_payload) for model_name in TEXT_MODELS]
+            results = await asyncio.gather(*tasks)
+            
+            for res in results:
+                if res:
+                    reply_text = res
                     break
             
-            # Убираем любые задержки (sleep(0)), чтобы бот лупил запросы с максимальной скоростью процессора
-            await asyncio.sleep(0)
+            if reply_text:
+                break
+            
+            await asyncio.sleep(0.5)
 
     chat_history[chat_id].append({"role": "user", "content": text_content})
     chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -458,4 +465,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-        
+    
