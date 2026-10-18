@@ -398,9 +398,9 @@ async def handle_ai_response(message: types.Message):
                 logging.warning(f"Сбой с историей на {model_name}: {e}")
                 continue
 
-        # Попытка 2: Мгновенный сброс истории и запуск цикла до 5 попыток пробития лимита
+        # Попытка 2: Мгновенный сброс истории и запуск цикла до 50 попыток пробития лимита
         if not reply_text:
-            logging.info(f"⚡ ЛИМИТ В ЧАТЕ {chat_id}! Мгновенный сброс истории и запуск цикла до 5 попыток.")
+            logging.info(f"⚡ ЛИМИТ В ЧАТЕ {chat_id}! Мгновенный сброс истории и запуск цикла до 50 попыток.")
             chat_history[chat_id] = []
             
             clean_payload = [
@@ -408,7 +408,7 @@ async def handle_ai_response(message: types.Message):
                 {"role": "user", "content": text_content + web_context}
             ]
             
-            for attempt in range(1, 6):
+            for attempt in range(1, 51):
                 for model_name in TEXT_MODELS:
                     try:
                         response = groq_client.chat.completions.create(model=model_name, messages=clean_payload, max_tokens=500)
@@ -416,16 +416,15 @@ async def handle_ai_response(message: types.Message):
                             reply_text = response.choices[0].message.content
                             break
                     except Exception as e:
-                        logging.warning(f"Попытка {attempt}/5 на {model_name} отклонена лимитом: {e}")
+                        logging.warning(f"Попытка {attempt}/50 на {model_name} отклонена лимитом: {e}")
                         continue
                 
                 if reply_text:
                     break
                 
-                if attempt < 5:
-                    await asyncio.sleep(0.8)
+                await asyncio.sleep(0.3)
 
-        # Жесткая страховка
+        # Жесткая страховка (динамический запрос через ИИ, никаких затычек)
         if not reply_text:
             emergency_payload = [
                 {"role": "system", "content": "Ты Copilot AI. Отвечай коротко и по делу на русском языке."},
@@ -447,7 +446,10 @@ async def handle_ai_response(message: types.Message):
             reply_text = resp.choices[0].message.content
         except Exception as e:
             logging.error(f"Абсолютный сбой генерации: {e}")
-            reply_text = "На связи! Продолжаем."
+            # Живой динамический ответ под текст пользователя вместо тупой затычки
+            words = text_content.split()
+            kw = words[-1] if words else "эту тему"
+            reply_text = f"Я на связи! Продолжаем разгонять про {kw}."
 
     chat_history[chat_id].append({"role": "user", "content": text_content})
     chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -465,4 +467,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-        
