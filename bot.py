@@ -207,9 +207,8 @@ async def process_user_message_async(message: types.Message):
 
             if not reply_text:
                 chat_history[chat_id] = []
-                clean_vision_payload = vision_messages
-                for _ in range(15):
-                    tasks = [asyncio.to_thread(fetch_completion_sync, model_name, clean_vision_payload) for model_name in TEXT_MODELS]
+                while not reply_text:
+                    tasks = [asyncio.to_thread(fetch_completion_sync, model_name, vision_messages) for model_name in TEXT_MODELS]
                     results = await asyncio.gather(*tasks)
                     for res in results:
                         if res:
@@ -217,7 +216,7 @@ async def process_user_message_async(message: types.Message):
                             break
                     if reply_text:
                         break
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.3)
 
         except Exception as e:
             logging.error(f"Критическая ошибка обработки фото: {e}")
@@ -277,7 +276,6 @@ async def process_user_message_async(message: types.Message):
 
     is_voice_requested = lower_text.startswith("озв") or lower_text.startswith("скаж") or "озвучь" in lower_text or "скажи голосом" in lower_text
 
-    # В ЛИЧНЫХ СООБЩЕНИЯХ БОТ ОТВЕЧАЕТ ВСЕГДА И МГНОВЕННО БЕЗ ЛИШНИХ УСЛОВИЙ
     should_answer = True
     if chat_type != "private" and not getattr(message, "business_connection_id", None) and not is_voice_requested:
         should_answer = False
@@ -414,15 +412,15 @@ async def process_user_message_async(message: types.Message):
 
     reply_text = None
     
-    # 1. ШТАТНЫЙ РЕЖИМ (БЕЗ ЛИМИТА): Мгновенный ответ за миллисекунды
+    # 1. ШТАТНЫЙ РЕЖИМ (БЕЗ ЛИМИТА): Мгновенный ответ с первой попытки
     for model_name in TEXT_MODELS:
         reply_text = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload)
         if reply_text:
             break
 
-    # 2. РЕЖИМ ЛИМИТА: МГНОВЕННЫЙ СБРОС ИСТОРИИ И ПАРАЛЛЕЛЬНЫЙ ШТУРМ ЗА 5-12 СЕКУНД
+    # 2. РЕЖИМ ЛИМИТА: МГНОВЕННЫЙ СБРОС ИСТОРИИ И БЕСКОНЕЧНЫЙ ПАРАЛЛЕЛЬНЫЙ ШТУРМ ДО ПОБЕДНОГО
     if not reply_text:
-        logging.info(f"⚡ ЛИМИТ В ЧАТЕ {chat_id}! Сброс истории и штурм.")
+        logging.info(f"⚡ РЕАЛЬНЫЙ ЛИМИТ В ЧАТЕ {chat_id}! Сброс истории и бесконечный штурм моделей.")
         chat_history[chat_id] = []
         
         clean_payload = [
@@ -430,7 +428,7 @@ async def process_user_message_async(message: types.Message):
             {"role": "user", "content": text_content}
         ]
         
-        for _ in range(15):
+        while not reply_text:
             tasks = [asyncio.to_thread(fetch_completion_sync, model_name, clean_payload) for model_name in TEXT_MODELS]
             results = await asyncio.gather(*tasks)
             
@@ -442,10 +440,7 @@ async def process_user_message_async(message: types.Message):
             if reply_text:
                 break
             
-            await asyncio.sleep(0.5)
-
-    if not reply_text:
-        reply_text = "Сервера перегружены, но я на связи. Повтори запрос!"
+            await asyncio.sleep(0.3)
 
     chat_history[chat_id].append({"role": "user", "content": text_content})
     chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -463,4 +458,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-                        
+        
