@@ -380,7 +380,7 @@ async def handle_ai_response(message: types.Message):
 
     await bot.send_chat_action(chat_id=chat_id, action="typing")
     
-    # Добавляем сообщение пользователя в историю
+    # 1. Попытка ответить с сохранением истории
     chat_history[chat_id].append({"role": "user", "content": text_content + web_context})
     if len(chat_history[chat_id]) > 6:
         chat_history[chat_id] = chat_history[chat_id][-6:]
@@ -389,42 +389,55 @@ async def handle_ai_response(message: types.Message):
 
     reply_text = None
     
-    # ПОПЫТКА 1: Генерация ответа через основной контекст
     for model_name in TEXT_MODELS:
         try:
-            response = groq_client.chat.completions.create(model=model_name, messages=messages_payload, max_tokens=1000)
+            response = groq_client.chat.completions.create(model=model_name, messages=messages_payload, max_tokens=600)
             if response.choices and response.choices[0].message.content:
                 reply_text = response.choices[0].message.content
                 break
         except Exception as e:
-            logging.warning(f"Сбой модели {model_name}: {e}")
+            logging.warning(f"Ошибка запроса с историей к {model_name}: {e}")
             continue
 
-    # ПОПЫТКА 2 (ЕСЛИ ЛИМИТ/ОШИБКА): Мгновенно стираем историю и генерируем ответ НА ЭТО ЖЕ СООБЩЕНИЕ!
+    # 2. ЕСЛИ ВЫЛЕЗ ЛИМИТ / ОШИБКА: Мгновенно чистим историю и делаем чистый запрос ТОЛЬКО с этим сообщением!
     if not reply_text:
-        logging.info(f"🔄 ЛИМИТ/СБОЙ В ЧАТЕ {chat_id}: Автоматически очищаем историю и отвечаем на последнее сообщение!")
+        logging.info(f"⚡ МГНОВЕННЫЙ СБРОС ИСТОРИИ ДЛЯ {chat_id} ИЗ-ЗА ЛИМИТА! Отвечаем напрямую на последнее сообщение.")
         
-        # Полностью очищаем историю диалога
+        # Полностью очищаем историю, так как она забила лимит
         chat_history[chat_id] = []
         
-        # Создаем чистый запрос ТОЛЬКО с текущим сообщением пользователя
-        fresh_payload = [
+        # Одиночный чистый запрос БЕЗ старой истории
+        clean_payload = [
             {"role": "system", "content": chat_custom_instructions[chat_id]},
             {"role": "user", "content": text_content + web_context}
         ]
         
         for model_name in TEXT_MODELS:
             try:
-                response = groq_client.chat.completions.create(model=model_name, messages=fresh_payload, max_tokens=800)
+                response = groq_client.chat.completions.create(model=model_name, messages=clean_payload, max_tokens=500)
                 if response.choices and response.choices[0].message.content:
                     reply_text = response.choices[0].message.content
                     break
             except Exception as e:
-                logging.error(f"Повторная генерация на {model_name} выдала ошибку: {e}")
+                logging.error(f"Аварийный одиночный запрос на {model_name} вылетел: {e}")
                 continue
 
-    # Сохраняем сформированный ответ ИИ в историю и отправляем пользователю
+    # 3. ЕСЛИ ВСЕ МОДЕЛИ ВРЕИЕННО ЗАНЯТЫ: Делаем еще один легкий вызов с минимальным лимитом токенов
+    if not reply_text:
+        try:
+            minimal_payload = [
+                {"role": "system", "content": "Ты Copilot AI. Ответь коротко и по делу на русском языке."},
+                {"role": "user", "content": text_content}
+            ]
+            response = groq_client.chat.completions.create(model="llama-3.3-70b-versatile", messages=minimal_payload, max_tokens=200)
+            if response.choices and response.choices[0].message.content:
+                reply_text = response.choices[0].message.content
+        except Exception as e:
+            logging.error(f"Легкий аварийный запрос ошибся: {e}")
+
+    # Если ответ наконец сгенерирован — добавляем его в свежую историю и отправляем
     if reply_text:
+        chat_history[chat_id].append({"role": "user", "content": text_content})
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
         processed_text = clean_text_for_telegram(reply_text)
         try:
@@ -438,4 +451,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-                
+            
