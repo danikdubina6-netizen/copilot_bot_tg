@@ -64,34 +64,41 @@ group_message_counters = {}
 chat_last_interaction = {}
 AUTO_CLEAR_HOURS = 6
 
-def search_web_real_sync(query: str, max_results=4) -> str:
-    """Умный веб-поиск: извлекает ключевые факты и свежие новости из интернета"""
+def search_web_real_sync(query: str, max_results=5) -> str:
+    """Ультра-умный веб-поиск: вытягивает заголовки и сниппеты из сети"""
     try:
-        clean_query = re.sub(r'[^\w\s]', '', query).strip()
+        clean_query = re.sub(r'[^\w\sА-Яа-яЁё]', '', query).strip()
         encoded_query = urllib.parse.quote(clean_query)
         url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
         
         req = urllib.request.Request(
             url, 
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
         )
         
-        with urllib.request.urlopen(req, timeout=3) as response:
+        with urllib.request.urlopen(req, timeout=4) as response:
             html_content = response.read().decode('utf-8', errors='ignore')
             soup = BeautifulSoup(html_content, 'html.parser')
             
             snippets = []
-            for result in soup.find_all('a', class_='result__snippet'):
-                text = result.get_text(strip=True)
-                if text and len(text) > 20:
-                    snippets.append(text)
+            for result in soup.find_all('div', class_='result'):
+                title_tag = result.find('a', class_='result__url')
+                snippet_tag = result.find('a', class_='result__snippet')
+                
+                title = title_tag.get_text(strip=True) if title_tag else ""
+                snippet = snippet_tag.get_text(strip=True) if snippet_tag else ""
+                
+                combined = f"{title}: {snippet}" if title else snippet
+                if combined and len(combined) > 15:
+                    snippets.append(combined)
+                
                 if len(snippets) >= max_results:
                     break
                     
             if snippets:
                 return "\n• " + "\n• ".join(snippets)
     except Exception as e:
-        logging.warning(f"Умный поиск пропущен или недоступен: {e}")
+        logging.warning(f"Ошибка веб-поиска: {e}")
     return ""
 
 def clean_text_for_telegram(text: str) -> str:
@@ -187,14 +194,13 @@ async def process_user_message_async(message: types.Message):
         chat_history[chat_id] = []
 
     # ==========================================
-    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО (БЕЗ СТОРОННИХ МОДУЛЕЙ)
+    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО
     # ==========================================
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         reply_text = None
         
         try:
-            # Берем среднее качество фото из массива Telegram, чтобы не брать максимальный гигабайтный пресет
             photo = message.photo[-2] if len(message.photo) > 1 else message.photo[-1]
             photo_file = await bot.get_file(photo.file_id)
             photo_bytes_io = await bot.download_file(photo_file.file_path)
@@ -400,7 +406,7 @@ async def process_user_message_async(message: types.Message):
         return
 
     # ==========================================
-    # ТОЧЕЧНЫЙ УМНЫЙ ВЕБ-ПОИСК (БЕЗ ЛОЖНЫХ СРАБАТЫВАНИЙ)
+    # ТОЧЕЧНЫЙ УМНЫЙ ВЕБ-ПОИСК (ОБНОВЛЕННЫЙ)
     # ==========================================
     explicit_search_triggers = ["найди", "погугли", "ищи", "загугли", "новости", "курс", "погода", "цена"]
     info_questions = ["кто такой", "что такое", "когда был", "где находится", "сколько стоит", "какой состав"]
