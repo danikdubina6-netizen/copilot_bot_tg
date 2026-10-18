@@ -6,6 +6,8 @@ import re
 import html
 import base64
 import urllib.parse
+import urllib.request
+import json
 from gtts import gTTS
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
@@ -52,6 +54,36 @@ user_rate_limits = {}
 RATE_LIMIT_COUNT = 6
 RATE_LIMIT_PERIOD = 10
 
+def search_web(query: str, max_results=3) -> str:
+    """Быстрый поиск свежей информации через DuckDuckGo Instant Answer API"""
+    try:
+        encoded_query = urllib.parse.quote(query)
+        url = f"https://api.duckduckgo.com/?q={encoded_query}&format=json&no_html=1&skip_disambig=1"
+        
+        req = urllib.request.Request(
+            url, 
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        )
+        
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            
+            results = []
+            if data.get("AbstractText"):
+                results.append(data["AbstractText"])
+                
+            for topic in data.get("RelatedTopics", []):
+                if "Text" in topic:
+                    results.append(topic["Text"])
+                if len(results) >= max_results:
+                    break
+                    
+            if results:
+                return "\n".join(results)
+    except Exception as e:
+        logging.error(f"Ошибка веб-поиска: {e}")
+    return ""
+
 def clean_text_for_telegram(text: str) -> str:
     text = text.replace("&nbsp;", " ")
     def code_block_replacer(match):
@@ -87,7 +119,7 @@ def parse_requested_emoji(text: str) -> str | None:
 async def start_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.answer("Здарова! Я <b>Copilot AI</b>. Скучать точно не дам, разрываем этот чат без душноты. Чё как?", parse_mode="HTML")
+    await message.answer("Здарова! Я <b>Copilot AI</b> с поддержкой веб-поиска. Вытащу любую свежую инфу из сети в секунду. Чё как?", parse_mode="HTML")
 
 @dp.message(Command("reset"))
 async def reset_cmd(message: types.Message):
@@ -183,7 +215,6 @@ async def handle_ai_response(message: types.Message):
             
         if not should_answer:
             group_message_counters[chat_id] = group_message_counters.get(chat_id, 0) + 1
-            # Четко триггер на ровно 15 сообщений
             if group_message_counters[chat_id] >= 15:
                 group_message_counters[chat_id] = 0
                 should_answer = True
@@ -283,7 +314,6 @@ async def handle_ai_response(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
-    # ОБРАБОТКА ФОТО ЧЕРЕЗ QWEN VISION
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         reply_text = None
@@ -323,19 +353,7 @@ async def handle_ai_response(message: types.Message):
             logging.error(f"Ошибка Qwen Vision: {e}")
 
         if not reply_text:
-            try:
-                fallback_payload = [
-                    {"role": "system", "content": chat_custom_instructions[chat_id]},
-                    {"role": "user", "content": f"Пользователь скинул картинку с подписью: '{text_content}'. Опиши её весело и с рофлом!"}
-                ]
-                resp = groq_client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
-                    messages=fallback_payload,
-                    max_tokens=600
-                )
-                reply_text = resp.choices[0].message.content
-            except Exception:
-                reply_text = "Картинка огонь, стиль лютый! 🔥"
+            reply_text = "Картинка огонь, стиль лютый! 🔥"
 
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -346,10 +364,19 @@ async def handle_ai_response(message: types.Message):
     if not text_content:
         return
 
+    # Авто-определение: если в запросе спрашивают про факты, новости или погоду — делаем веб-поиск
+    search_keywords = ["найди", "погугли", "что такое", "кто такой", "курс", "цена", "новости", "погода", "сегодня", "вчера", "когда", "где", "какой", "какая"]
+    web_context = ""
+    if any(kw in lower_text for kw in search_keywords) or len(text_content.split()) > 2:
+        await bot.send_chat_action(chat_id=chat_id, action="typing")
+        search_result = await asyncio.get_running_loop().run_in_executor(None, lambda: search_web(text_content))
+        if search_result:
+            web_context = f"\n\n[АКТУАЛЬНЫЕ ДАННЫЕ ИЗ СЕТИ ПО ЗАПРОСУ]:\n{search_result}"
+
     mirror_adaptation = f"\n\n[РЕЖИМ ОБЩЕНИЯ]: Будь максимально весёлым, бодрым и позитивным! Если есть приказ по стилю — держи его, если нет — используй умное зеркальное поведение, но без душноты!"
 
     await bot.send_chat_action(chat_id=chat_id, action="typing")
-    chat_history[chat_id].append({"role": "user", "content": text_content})
+    chat_history[chat_id].append({"role": "user", "content": text_content + web_context})
     if len(chat_history[chat_id]) > 6:
         chat_history[chat_id] = chat_history[chat_id][-6:]
 
@@ -363,8 +390,8 @@ async def handle_ai_response(message: types.Message):
             if reply_text:
                 break
         except Exception as e:
-            logging.warning(f"Модель {model_name} ошибка: {e}")
-            continue
+                    logging.warning(f"Модель {model_name} ошибка: {e}")
+                    continue
 
     if reply_text:
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -377,9 +404,9 @@ async def handle_ai_response(message: types.Message):
         await message.reply("⚠️ <b>Лимит токенов Copilot AI!</b> Сделай /reset.", parse_mode="HTML")
 
 async def main():
-    print(">>> Copilot AI запущен! <<<")
+    print(">>> Copilot AI с веб-поиском запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-            
+    
