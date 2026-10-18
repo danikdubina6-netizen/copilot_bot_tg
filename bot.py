@@ -28,12 +28,19 @@ if GROQ_API_KEY:
 
 BOT_USERNAME = "Copilot_AI2026_bot"
 
-# Штурмовой пул из 4 моделей
+# Штурмовой пул текстовых моделей
 TEXT_MODELS = [
     "llama-3.3-70b-versatile",
     "qwen/qwen3.8-27b",
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b"
+]
+
+# Отдельный пул моделей с поддержкой мультимодального ввода (Vision для картинок)
+VISION_MODELS = [
+    "qwen/qwen3.8-27b",
+    "llama-3.2-90b-vision-preview",
+    "llama-3.2-11b-vision-preview"
 ]
 
 BASE_INSTRUCTION = (
@@ -181,7 +188,7 @@ async def process_user_message_async(message: types.Message):
         chat_history[chat_id] = []
 
     # ==========================================
-    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО (ШТУРМ ПО ВСЕМ МОДЕЛЯМ)
+    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО (ЧЕРЕЗ VISION МОДЕЛИ)
     # ==========================================
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
@@ -213,7 +220,7 @@ async def process_user_message_async(message: types.Message):
             ]
 
             while not reply_text:
-                tasks = [asyncio.to_thread(fetch_completion_sync, model_name, vision_messages) for model_name in TEXT_MODELS]
+                tasks = [asyncio.to_thread(fetch_completion_sync, model_name, vision_messages) for model_name in VISION_MODELS]
                 results = await asyncio.gather(*tasks)
                 for res in results:
                     if res:
@@ -464,4 +471,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
