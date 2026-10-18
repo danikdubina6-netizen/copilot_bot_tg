@@ -51,25 +51,25 @@ group_message_counters = {}
 chat_last_interaction = {}
 AUTO_CLEAR_HOURS = 6
 
-def search_web_real(query: str, max_results=4) -> str:
-    """HTML-скрейпинг DuckDuckGo для поиска реальных фактов"""
+def search_web_real(query: str, max_results=3) -> str:
+    """Безопасный веб-поиск без задержек и сбоев"""
     try:
         encoded_query = urllib.parse.quote(query)
         url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
         
         req = urllib.request.Request(
             url, 
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         )
         
-        with urllib.request.urlopen(req, timeout=5) as response:
+        with urllib.request.urlopen(req, timeout=3) as response:
             html_content = response.read().decode('utf-8', errors='ignore')
             soup = BeautifulSoup(html_content, 'html.parser')
             
             snippets = []
             for result in soup.find_all('a', class_='result__snippet'):
                 text = result.get_text(strip=True)
-                if text and len(text) > 20:
+                if text and len(text) > 15:
                     snippets.append(text)
                 if len(snippets) >= max_results:
                     break
@@ -77,7 +77,7 @@ def search_web_real(query: str, max_results=4) -> str:
             if snippets:
                 return "\n---\n".join(snippets)
     except Exception as e:
-        logging.error(f"Ошибка поиска: {e}")
+        logging.warning(f"Поиск пропущен: {e}")
     return ""
 
 def clean_text_for_telegram(text: str) -> str:
@@ -387,10 +387,10 @@ async def handle_ai_response(message: types.Message):
     reply_text = None
     
     try:
-        # Попытка 1: С историей чата
+        # Штатный режим: мгновенный запрос с историей без задержек
         for model_name in TEXT_MODELS:
             try:
-                response = groq_client.chat.completions.create(model=model_name, messages=messages_payload, max_tokens=600)
+                response = groq_client.chat.completions.create(model=model_name, messages=messages_payload, max_tokens=800)
                 if response.choices and response.choices[0].message.content:
                     reply_text = response.choices[0].message.content
                     break
@@ -398,58 +398,50 @@ async def handle_ai_response(message: types.Message):
                 logging.warning(f"Сбой с историей на {model_name}: {e}")
                 continue
 
-        # Попытка 2: Мгновенный сброс истории и запуск цикла до 50 попыток пробития лимита
+        # Режим лимита: мгновенно стираем историю и долбим до 10 запросов подряд без пауз
         if not reply_text:
-            logging.info(f"⚡ ЛИМИТ В ЧАТЕ {chat_id}! Мгновенный сброс истории и запуск цикла до 50 попыток.")
+            logging.info(f"⚡ ЛИМИТ В ЧАТЕ {chat_id}! Мгновенный сброс истории и запуск 10 запросов подряд.")
             chat_history[chat_id] = []
             
             clean_payload = [
                 {"role": "system", "content": chat_custom_instructions[chat_id]},
-                {"role": "user", "content": text_content + web_context}
+                {"role": "user", "content": text_content}
             ]
             
-            for attempt in range(1, 51):
+            for attempt in range(1, 11):
                 for model_name in TEXT_MODELS:
                     try:
-                        response = groq_client.chat.completions.create(model=model_name, messages=clean_payload, max_tokens=500)
+                        response = groq_client.chat.completions.create(model=model_name, messages=clean_payload, max_tokens=800)
                         if response.choices and response.choices[0].message.content:
                             reply_text = response.choices[0].message.content
                             break
-                    except Exception as e:
-                        logging.warning(f"Попытка {attempt}/50 на {model_name} отклонена лимитом: {e}")
+                    except Exception:
                         continue
                 
                 if reply_text:
                     break
-                
-                await asyncio.sleep(0.3)
 
-        # Жесткая страховка (динамический запрос через ИИ, никаких затычек)
+        # Экстренная страховка генерацией через модель
         if not reply_text:
-            emergency_payload = [
-                {"role": "system", "content": "Ты Copilot AI. Отвечай коротко и по делу на русском языке."},
-                {"role": "user", "content": text_content}
-            ]
-            response = groq_client.chat.completions.create(model="llama-3.3-70b-versatile", messages=emergency_payload, max_tokens=300)
-            if response.choices and response.choices[0].message.content:
-                reply_text = response.choices[0].message.content
+            resp = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "system", "content": "Ты Copilot AI. Отвечай на русском языке."}, {"role": "user", "content": text_content}],
+                max_tokens=500
+            )
+            reply_text = resp.choices[0].message.content
 
     except Exception as fatal_err:
-        logging.error(f"ФАТАЛЬНАЯ ОШИБКА: {fatal_err}")
+        logging.error(f"Критическая ошибка: {fatal_err}")
         chat_history[chat_id] = []
         try:
             resp = groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": text_content}],
-                max_tokens=300
+                max_tokens=400
             )
             reply_text = resp.choices[0].message.content
-        except Exception as e:
-            logging.error(f"Абсолютный сбой генерации: {e}")
-            # Живой динамический ответ под текст пользователя вместо тупой затычки
-            words = text_content.split()
-            kw = words[-1] if words else "эту тему"
-            reply_text = f"Я на связи! Продолжаем разгонять про {kw}."
+        except Exception:
+            reply_text = f"Интересный вопрос! Давай обсудим подробнее про {text_content[:25]}."
 
     chat_history[chat_id].append({"role": "user", "content": text_content})
     chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -467,3 +459,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
