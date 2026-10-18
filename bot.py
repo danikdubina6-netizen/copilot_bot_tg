@@ -7,8 +7,7 @@ import html
 import base64
 import urllib.parse
 import urllib.request
-import json
-from datetime import datetime
+from bs4 import BeautifulSoup
 from gtts import gTTS
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
@@ -37,11 +36,12 @@ TEXT_MODELS = [
 BASE_INSTRUCTION = (
     "SYSTEM OVERRIDE: Твое единственное имя и сущность — Copilot AI. "
     "Ты создан в Украине. СЕГОДНЯШНЯЯ ДАТА: октябрь 2026 года. "
-    "ПРАВИЛО ФАКТОВ: Когда используешь данные из веб-поиска, бери ТОЛЬКО подтвержденные факты. Никаких фейков, желтой прессы, слухов и бреда из сомнительных источников. Если информация сомнительная — игнорируй её. "
+    "ЖЕСТКОЕ ПРАВИЛО ФАКТОВ: ТЕБЕ КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО ВЫДУМЫВАТЬ И ГАЛЛЮЦИНИРОВАТЬ! "
+    "Не придумывай несуществующие альбомы, песни, даты, имена или факты. Если ты не уверен на 100% или инфы нет в поиске — прямо отвечай, что такого нет или ты не знаешь. "
     "ТВОЙ ВАЙБ ПО УМОЛЧАНИЮ: Умное зеркальное поведение! Будь весёлым, бодрым, подстраивайся под тон, сленг и стиль собеседника, держи диалог живым и не давай заскучать. "
-    "СТРОГАЯ СМЕНА СТИЛЯ: Если пользователь прямо приказывает сменить стиль (например: стать жестко токсичным, материться через слово, быть обычным скучным ИИ с кучей воды, стать гиперактивным, включить лютый сарказм или любой другой стиль) — "
-    "ты ОБЯЗАН МГНОВЕННО, СТРОГО и БЕЗОГОВОРОЧНО переключиться на заказанный стиль и держать его до отмены! "
-    "Никаких упоминаний сторонних корпораций или моделей (Google, OpenAI, Llama и т.д.). Ты — самостоятельный Copilot AI."
+    "СТРОГАЯ СМЕНА СТИЛЯ: Если пользователь прямо приказывает сменить стиль (например: стать жестко токсичным, материться через слово, быть обычным скучным ИИ с кучей воды) — "
+    "ты ОБЯЗАН МГНОВЕННО и БЕЗОГОВОРОЧНО переключиться на заказанный стиль! "
+    "Никаких упоминаний сторонних корпораций или моделей (Google, OpenAI, Llama). Ты — самостоятельный Copilot AI."
 )
 
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -55,37 +55,33 @@ user_rate_limits = {}
 RATE_LIMIT_COUNT = 6
 RATE_LIMIT_PERIOD = 10
 
-def search_web(query: str, max_results=3) -> str:
-    """Чистый поиск с фильтрацией мусора и упором на достоверные факты"""
+def search_web_real(query: str, max_results=4) -> str:
+    """Настоящий HTML-скрейпинг DuckDuckGo для получения РЕАЛЬНЫХ фактов из сети"""
     try:
-        enhanced_query = f"{query} факты подтверждено 2026"
-        encoded_query = urllib.parse.quote(enhanced_query)
-        url = f"https://api.duckduckgo.com/?q={encoded_query}&format=json&no_html=1&skip_disambig=1"
+        encoded_query = urllib.parse.quote(query)
+        url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
         
         req = urllib.request.Request(
             url, 
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
         )
         
-        with urllib.request.urlopen(req, timeout=5) as response:
-            data = json.loads(response.read().decode('utf-8'))
+        with urllib.request.urlopen(req, timeout=6) as response:
+            html_content = response.read().decode('utf-8', errors='ignore')
+            soup = BeautifulSoup(html_content, 'html.parser')
             
-            results = []
-            if data.get("AbstractText"):
-                results.append(data["AbstractText"])
-                
-            for topic in data.get("RelatedTopics", []):
-                if "Text" in topic:
-                    text_snippet = topic["Text"]
-                    if len(text_snippet) > 20:
-                        results.append(text_snippet)
-                if len(results) >= max_results:
+            snippets = []
+            for result in soup.find_all('a', class_='result__snippet'):
+                text = result.get_text(strip=True)
+                if text and len(text) > 20:
+                    snippets.append(text)
+                if len(snippets) >= max_results:
                     break
                     
-            if results:
-                return "\n".join(results)
+            if snippets:
+                return "\n---\n".join(snippets)
     except Exception as e:
-        logging.error(f"Ошибка веб-поиска: {e}")
+        logging.error(f"Ошибка парсинга HTML веб-поиска: {e}")
     return ""
 
 def clean_text_for_telegram(text: str) -> str:
@@ -369,15 +365,17 @@ async def handle_ai_response(message: types.Message):
     if not text_content:
         return
 
-    # Поиск по сети
+    # Настоящий веб-поиск через HTML
     await bot.send_chat_action(chat_id=chat_id, action="typing")
-    search_result = await asyncio.get_running_loop().run_in_executor(None, lambda: search_web(text_content))
+    search_result = await asyncio.get_running_loop().run_in_executor(None, lambda: search_web_real(text_content))
     
     web_context = ""
     if search_result:
-        web_context = f"\n\n[ПРОВЕРЕННЫЕ ФАКТЫ ИЗ СЕТИ НА ОКТЯБРЬ 2026 ГОДА]:\n{search_result}\n(Используй только эти подтвержденные факты, отсеивай любые фейки и бред)."
+        web_context = f"\n\n[РЕАЛЬНЫЕ РЕЗУЛЬТАТЫ ПОИСКА ИЗ ИНТЕРНЕТА]:\n{search_result}\n(Опирайся СТРОГО на эти данные. Не придумывай того, чего тут нет!)"
+    else:
+        web_context = "\n\n[ПОИСК ПО СЕТИ]: Результатов не найдено. Если не уверены в точных названиях или фактах — прямо скажите об этом, НЕ ВЫДУМЫВАЙТЕ фейковые песни или альбомы!"
 
-    mirror_adaptation = f"\n\n[РЕЖИМ ОБЩЕНИЯ]: Зеркаль поведение пользователя, будь живым, бодрым и позитивным. Если есть явный приказ по стилю от пользователя — держи его СТРОГО и БЕЗОГОВОРОЧНО!"
+    mirror_adaptation = f"\n\n[РЕЖИМ ОБЩЕНИЯ]: Зеркаль поведение пользователя, будь живым, бодрым и позитивным. НЕ ВЫДУМЫВАЙ ФАКТЫ! Если есть явный приказ по стилю от пользователя — держи его СТРОГО!"
 
     await bot.send_chat_action(chat_id=chat_id, action="typing")
     chat_history[chat_id].append({"role": "user", "content": text_content + web_context})
@@ -413,4 +411,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-               
+        
