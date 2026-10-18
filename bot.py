@@ -36,10 +36,8 @@ TEXT_MODELS = [
     "openai/gpt-oss-20b"
 ]
 
-# Пул моделей для картинок (Vision) — с обновленными рабочими именами
+# Рабочая мультимодальная модель для картинок
 VISION_MODELS = [
-    "llama-3.2-11b-vision-instruct",
-    "llama-3.2-90b-vision-instruct",
     "qwen/qwen3.8-27b"
 ]
 
@@ -127,9 +125,9 @@ def parse_requested_emoji(text: str) -> str | None:
     if "гнев" in lower or "злой" in lower or "💢" in lower: return "💢"
     return None
 
-def fetch_completion_sync(model_name, messages):
+def fetch_completion_sync(model_name, messages, max_toks=1000):
     try:
-        response = groq_client.chat.completions.create(model=model_name, messages=messages, max_tokens=1000)
+        response = groq_client.chat.completions.create(model=model_name, messages=messages, max_tokens=max_toks)
         if response.choices and response.choices[0].message.content:
             return response.choices[0].message.content
     except Exception as e:
@@ -189,7 +187,7 @@ async def process_user_message_async(message: types.Message):
         chat_history[chat_id] = []
 
     # ==========================================
-    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО (МГНОВЕННЫЙ ШТУРМ)
+    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО (ЧЕРЕЗ QWEN)
     # ==========================================
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
@@ -221,7 +219,8 @@ async def process_user_message_async(message: types.Message):
                 }
             ]
 
-            tasks = [asyncio.to_thread(fetch_completion_sync, model_name, vision_messages) for model_name in VISION_MODELS]
+            # Штурмуем через Qwen с лимитом в 600 токенов (экономим суточный TPD)
+            tasks = [asyncio.to_thread(fetch_completion_sync, model_name, vision_messages, 600) for model_name in VISION_MODELS]
             results = await asyncio.gather(*tasks, return_exceptions=True)
             
             for res in results:
@@ -236,7 +235,7 @@ async def process_user_message_async(message: types.Message):
             error_logs.append(f"Global Photo Error: {e}")
             logging.error(f"Критическая ошибка загрузки фото: {e}")
 
-        final_reply = reply_text if reply_text else ("❌ СБОЙ ВСЕХ VISION МОДЕЛЕЙ:\n" + "\n".join(error_logs))
+        final_reply = reply_text if reply_text else ("❌ СБОЙ VISION МОДЕЛИ:\n" + "\n".join(error_logs))
         
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
         chat_history[chat_id].append({"role": "assistant", "content": final_reply})
@@ -433,7 +432,7 @@ async def process_user_message_async(message: types.Message):
     
     # 1. ШТАТНЫЙ РЕЖИМ (БЕЗ ЛИМИТА): Мгновенный ответ за миллисекунды
     for model_name in TEXT_MODELS:
-        res = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload)
+        res = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload, 1000)
         if res and not res.startswith("ERR_API"):
             reply_text = res
             break
@@ -449,7 +448,7 @@ async def process_user_message_async(message: types.Message):
         ]
         
         while not reply_text:
-            tasks = [asyncio.to_thread(fetch_completion_sync, model_name, clean_payload) for model_name in TEXT_MODELS]
+            tasks = [asyncio.to_thread(fetch_completion_sync, model_name, clean_payload, 1000) for model_name in TEXT_MODELS]
             results = await asyncio.gather(*tasks)
             
             for res in results:
@@ -462,7 +461,7 @@ async def process_user_message_async(message: types.Message):
             
             await asyncio.sleep(0)
 
-    chat_history[chat_id].append({"role": "user", "content": text__content})
+    chat_history[chat_id].append({"role": "user", "content": text_content})
     chat_history[chat_id].append({"role": "assistant", "content": reply_text})
     processed_text = clean_text_for_telegram(reply_text)
     
