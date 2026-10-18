@@ -181,7 +181,7 @@ async def process_user_message_async(message: types.Message):
         chat_history[chat_id] = []
 
     # ==========================================
-    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО
+    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО (ШТУРМ ПО ВСЕМ МОДЕЛЯМ)
     # ==========================================
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
@@ -212,28 +212,23 @@ async def process_user_message_async(message: types.Message):
                 }
             ]
 
-            reply_text = await asyncio.to_thread(fetch_completion_sync, "qwen/qwen3.8-27b", vision_messages)
-
-            if not reply_text:
-                chat_history[chat_id] = []
-                while not reply_text:
-                    tasks = [asyncio.to_thread(fetch_completion_sync, model_name, vision_messages) for model_name in TEXT_MODELS]
-                    results = await asyncio.gather(*tasks)
-                    for res in results:
-                        if res:
-                            reply_text = res
-                            break
-                    if reply_text:
+            while not reply_text:
+                tasks = [asyncio.to_thread(fetch_completion_sync, model_name, vision_messages) for model_name in TEXT_MODELS]
+                results = await asyncio.gather(*tasks)
+                for res in results:
+                    if res:
+                        reply_text = res
                         break
-                    await asyncio.sleep(0)
+                if reply_text:
+                    break
+                await asyncio.sleep(0)
 
         except Exception as e:
             logging.error(f"Критическая ошибка обработки фото: {e}")
-            chat_history[chat_id] = []
 
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
-        chat_history[chat_id].append({"role": "assistant", "content": reply_text or "Готово."})
-        processed_text = clean_text_for_telegram(reply_text or "Готово.")
+        chat_history[chat_id].append({"role": "assistant", "content": reply_text or "Не удалось распознать фото."})
+        processed_text = clean_text_for_telegram(reply_text or "Не удалось распознать фото.")
         await message.reply(processed_text, parse_mode="HTML")
         return
 
@@ -429,7 +424,7 @@ async def process_user_message_async(message: types.Message):
         if reply_text:
             break
 
-    # 2. РЕЖИМ ЛИМИТА: БЕСКОНЕЧНЫЙ ПАРАЛЛЕЛЬНЫЙ ШТУРМ ПО ВСЕМ МОДЕЛЯМ БЕЗ ПАУЗ ДО ПОБЕДЫ
+    # 2. РЕЖИМ ЛИМИТА: БЕСКОНЕЧНЫЙ ПАРАЛЛЕЛЬНЫЙ ШТУРМ ПО ВСЕМ МОДЕЛЯМ ДО ПОБЕДЫ
     if not reply_text:
         logging.info(f"⚡ ЛИМИТ/СБОЙ В ЧАТЕ {chat_id}! Запускаем бесконечный штурм всех серверов.")
         chat_history[chat_id] = []
@@ -469,3 +464,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
