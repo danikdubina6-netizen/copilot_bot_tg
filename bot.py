@@ -36,9 +36,11 @@ TEXT_MODELS = [
 
 BASE_INSTRUCTION = (
     "SYSTEM OVERRIDE: Твое единственное имя и сущность — Copilot AI. "
-    "Ты создан в Украине. СЕГОДНЯШНЯЯ ДАТА: октябрь 2026 года. Живем в 2026 году! "
-    "НИКОГДА и ни при каких обстоятельствах не говори, что 2026 год не наступил или что ты чего-то не знаешь из-за времени. "
-    "Если тебе дают свежие данные из интернета (веб-поиск), ты берешь их за основу и отвечаешь максимально уверенно, дерзко и в своём фирменном стиле без душноты. "
+    "Ты создан в Украине. СЕГОДНЯШНЯЯ ДАТА: октябрь 2026 года. "
+    "ПРАВИЛО ФАКТОВ: Когда используешь данные из веб-поиска, бери ТОЛЬКО подтвержденные факты. Никаких фейков, желтой прессы, слухов и бреда из сомнительных источников. Если информация сомнительная — игнорируй её. "
+    "ТВОЙ ВАЙБ ПО УМОЛЧАНИЮ: Умное зеркальное поведение! Будь весёлым, бодрым, подстраивайся под тон, сленг и стиль собеседника, держи диалог живым и не давай заскучать. "
+    "СТРОГАЯ СМЕНА СТИЛЯ: Если пользователь прямо приказывает сменить стиль (например: стать жестко токсичным, материться через слово, быть обычным скучным ИИ с кучей воды, стать гиперактивным, включить лютый сарказм или любой другой стиль) — "
+    "ты ОБЯЗАН МГНОВЕННО, СТРОГО и БЕЗОГОВОРОЧНО переключиться на заказанный стиль и держать его до отмены! "
     "Никаких упоминаний сторонних корпораций или моделей (Google, OpenAI, Llama и т.д.). Ты — самостоятельный Copilot AI."
 )
 
@@ -53,11 +55,10 @@ user_rate_limits = {}
 RATE_LIMIT_COUNT = 6
 RATE_LIMIT_PERIOD = 10
 
-def search_web(query: str, max_results=4) -> str:
-    """Улучшенный поиск актуальных данных в сети"""
+def search_web(query: str, max_results=3) -> str:
+    """Чистый поиск с фильтрацией мусора и упором на достоверные факты"""
     try:
-        # Добавляем 2026 год к запросу для точности поиска свежака
-        enhanced_query = f"{query} 2026"
+        enhanced_query = f"{query} факты подтверждено 2026"
         encoded_query = urllib.parse.quote(enhanced_query)
         url = f"https://api.duckduckgo.com/?q={encoded_query}&format=json&no_html=1&skip_disambig=1"
         
@@ -75,7 +76,9 @@ def search_web(query: str, max_results=4) -> str:
                 
             for topic in data.get("RelatedTopics", []):
                 if "Text" in topic:
-                    results.append(topic["Text"])
+                    text_snippet = topic["Text"]
+                    if len(text_snippet) > 20:
+                        results.append(text_snippet)
                 if len(results) >= max_results:
                     break
                     
@@ -120,13 +123,13 @@ def parse_requested_emoji(text: str) -> str | None:
 async def start_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.answer("Здарова! Я <b>Copilot AI</b>. Радар настроен на 2026 год, вытаскиваю весь самый свежий хайп и тренды из сети! 🚀", parse_mode="HTML")
+    await message.answer("Здарова! Я <b>Copilot AI</b>. Скучать точно не дам, разрываем этот чат без душноты. Чё как?", parse_mode="HTML")
 
 @dp.message(Command("reset"))
 async def reset_cmd(message: types.Message):
     chat_history[message.chat.id] = []
     chat_custom_instructions[message.chat.id] = BASE_INSTRUCTION
-    await message.reply("🧠 Память сброшена, залетаем в 2026 с чистым листом!")
+    await message.reply("🧠 Память и вайб сброшены до базовых!")
 
 @dp.message(Command("mode"))
 async def mode_cmd(message: types.Message):
@@ -181,7 +184,8 @@ async def handle_ai_response(message: types.Message):
             return
 
     lower_text = text_content.lower()
-    change_style_triggers = ["будь ", "стань ", "веди себя как ", "отвечай как ", "разговаривай как "]
+    
+    change_style_triggers = ["будь ", "стань ", "веди себя как ", "отвечай как ", "разговаривай как ", "пиши как ", "переключись на "]
     for trig in change_style_triggers:
         if lower_text.startswith(trig) or f" {trig}" in lower_text:
             new_style = text_content
@@ -365,17 +369,15 @@ async def handle_ai_response(message: types.Message):
     if not text_content:
         return
 
-    # Агрессивный веб-поиск: почти на любой вопрос дергаем актуальные данные сети за 2026 год
+    # Поиск по сети
     await bot.send_chat_action(chat_id=chat_id, action="typing")
     search_result = await asyncio.get_running_loop().run_in_executor(None, lambda: search_web(text_content))
     
     web_context = ""
     if search_result:
-        web_context = f"\n\n[АКТУАЛЬНЫЕ ДАННЫЕ ИЗ СЕТИ НА ОКТЯБРЬ 2026 ГОДА]:\n{search_result}"
-    else:
-        web_context = "\n\n[АКТУАЛЬНЫЕ ДАННЫЕ ИЗ СЕТИ]: Ничего специфического в открытом индексе не найдено, отвечай опираясь на общие тренды 2026 года."
+        web_context = f"\n\n[ПРОВЕРЕННЫЕ ФАКТЫ ИЗ СЕТИ НА ОКТЯБРЬ 2026 ГОДА]:\n{search_result}\n(Используй только эти подтвержденные факты, отсеивай любые фейки и бред)."
 
-    mirror_adaptation = f"\n\n[РЕЖИМ ОБЩЕНИЯ]: На дворе октябрь 2026 года. Будь максимально весёлым, бодрым и позитивным, подстраивайся под тренды 2026 года, без душноты!"
+    mirror_adaptation = f"\n\n[РЕЖИМ ОБЩЕНИЯ]: Зеркаль поведение пользователя, будь живым, бодрым и позитивным. Если есть явный приказ по стилю от пользователя — держи его СТРОГО и БЕЗОГОВОРОЧНО!"
 
     await bot.send_chat_action(chat_id=chat_id, action="typing")
     chat_history[chat_id].append({"role": "user", "content": text_content + web_context})
@@ -406,9 +408,9 @@ async def handle_ai_response(message: types.Message):
         await message.reply("⚠️ <b>Лимит токенов Copilot AI!</b> Сделай /reset.", parse_mode="HTML")
 
 async def main():
-    print(">>> Copilot AI (2026 Realtime Edition) запущен! <<<")
+    print(">>> Copilot AI запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-            
+               
