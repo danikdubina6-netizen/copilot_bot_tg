@@ -28,7 +28,7 @@ if GROQ_API_KEY:
 
 BOT_USERNAME = "Copilot_AI2026_bot"
 
-# Полный штурмовой пул моделей (4 модели для молниеносного пробития лимитов)
+# Штурмовой пул из 4 моделей для молниеносного пробития лимитов
 TEXT_MODELS = [
     "llama-3.3-70b-versatile",
     "qwen/qwen3.8-27b",
@@ -41,9 +41,10 @@ BASE_INSTRUCTION = (
     "СТРОЖАЙШИЙ ЗАПРЕТ: Категорически запрещено писать фразы 'на момент обновления базы знаний', "
     "'по состоянию на 2023 год', 'мои знания ограничены', 'я лишь ИИ' и любые подобные отмазки! "
     "Если в сообщении передан [ДАННЫЕ ИЗ СЕТИ (2026)], используй их как свежайшие факты прямо из интернета. "
-    "ПРАВИЛО КОНЦОВКИ: Всегда рассчитывай объем ответа так, чтобы полностью завершить мысль, предложение и абзац. Категорически запрещено обрывать текст на полуслове — если видишь, что лимит подходит к концу, кратко резюмируй мысль и поставь точку! "
+    "ОБЩЕНИЕ И ВАЙБ: Отвечай коротко, живо и по делу! На короткие реплики и оценки ('имбо', 'красава', 'так я оценил') "
+    "не пиши лекции и аналитику — поддерживай сленг и вайб собеседника, не душни. "
+    "ПРАВИЛО КОНЦОВКИ: Всегда рассчитывай объем ответа так, чтобы полностью завершить мысль, предложение и абзац. Никаких обрывов на полуслове! "
     "ЯЗЫК: Отвечай ИСКЛЮЧИТЕЛЬНО НА РУССКОМ ЯЗЫКЕ! Никакого украинского или английского текста. "
-    "ОБЩЕНИЕ: Отвечай живым языком, подстраивайся под сленг и вайб собеседника, не душни. "
     "ФАКТЫ: Не выдумывай несуществующие факты. "
     "СМЕНА СТИЛЯ: Если пользователь просит сменить стиль — исполняй строго и безоговорочно. "
     "Никогда не упоминай сторонние компании или нейросети (Google, OpenAI и др.)."
@@ -121,7 +122,6 @@ def parse_requested_emoji(text: str) -> str | None:
 
 def fetch_completion_sync(model_name, messages):
     try:
-        # Оптимальный лимит 1000 токенов с контролем завершенности
         response = groq_client.chat.completions.create(model=model_name, messages=messages, max_tokens=1000)
         if response.choices and response.choices[0].message.content:
             return response.choices[0].message.content
@@ -393,19 +393,21 @@ async def process_user_message_async(message: types.Message):
         return
 
     # ==========================================
-    # ВЕБ-ПОИСК И ТЕКСТОВЫЕ ОТВЕТЫ
+    # ТОЧЕЧНЫЙ УМНЫЙ ВЕБ-ПОИСК (БЕЗ ЛОЖНЫХ СРАБАТЫВАНИЙ)
     # ==========================================
-    search_triggers = [
-        "кто", "что", "когда", "где", "почему", "зачем", "как", "сколько", 
-        "найди", "погугли", "ищи", "новости", "курс", "погода", "цена", 
-        "2026", "2025", "2024", "состав", "альбом", "трек", "песня", "фильм", "актер"
-    ]
+    explicit_search_triggers = ["найди", "погугли", "ищи", "загугли", "новости", "курс", "погода", "цена"]
+    info_questions = ["кто такой", "что такое", "когда был", "где находится", "сколько стоит", "какой состав"]
     
-    has_question_mark = "?" in text_content
-    has_search_keyword = any(re.search(rf'\b{re.escape(trig)}\b', lower_text) for trig in search_triggers)
-    
+    need_web_search = False
+    if any(re.search(rf'\b{re.escape(trig)}\b', lower_text) for trig in explicit_search_triggers):
+        need_web_search = True
+    elif any(trig in lower_text for trig in info_questions):
+        need_web_search = True
+    elif "?" in text_content and any(year in lower_text for year in ["2026", "2025", "2024"]):
+        need_web_search = True
+
     web_context = ""
-    if (has_question_mark or has_search_keyword or len(text_content.split()) >= 3):
+    if need_web_search:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         search_result = await asyncio.to_thread(search_web_real_sync, text_content)
         if search_result:
@@ -421,13 +423,13 @@ async def process_user_message_async(message: types.Message):
 
     reply_text = None
     
-    # 1. ШТАТНЫЙ РЕЖИМ (БЕЗ ЛИМИТА): Мгновенный ответ с первой попытки за миллисекунды
+    # 1. ШТАТНЫЙ РЕЖИМ (БЕЗ ЛИМИТА): Мгновенный ответ за миллисекунды
     for model_name in TEXT_MODELS:
         reply_text = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload)
         if reply_text:
             break
 
-    # 2. РЕЖИМ ЛИМИТА: МГНОВЕННЫЙ СБРОС ИСТОРИИ И БЕСКОНЕЧНЫЙ ШТУРМ ПО ВСЕМ МОДЕЛЯМ БЕЗ ПАУЗ
+    # 2. РЕЖИМ ЛИМИТА: МГНОВЕННЫЙ СБРОС ИСТОРИИ И БЕСКОНЕЧНЫЙ ШТУРМ ПО 4 МОДЕЛЯМ БЕЗ ПАУЗ
     if not reply_text:
         logging.info(f"⚡ РЕАЛЬНЫЙ ЛИМИТ В ЧАТЕ {chat_id}! Сброс истории и безумный штурм.")
         chat_history[chat_id] = []
