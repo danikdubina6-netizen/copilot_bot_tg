@@ -51,8 +51,8 @@ group_message_counters = {}
 chat_last_interaction = {}
 AUTO_CLEAR_HOURS = 6
 
-def search_web_real(query: str, max_results=3) -> str:
-    """Безопасный веб-поиск без сбоев"""
+def search_web_real_sync(query: str, max_results=3) -> str:
+    """Безопасный синхронный веб-поиск для выноса в поток"""
     try:
         encoded_query = urllib.parse.quote(query)
         url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
@@ -62,7 +62,7 @@ def search_web_real(query: str, max_results=3) -> str:
             headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         )
         
-        with urllib.request.urlopen(req, timeout=3) as response:
+        with urllib.request.urlopen(req, timeout=2) as response:
             html_content = response.read().decode('utf-8', errors='ignore')
             soup = BeautifulSoup(html_content, 'html.parser')
             
@@ -398,7 +398,7 @@ async def process_user_message_async(message: types.Message):
     web_context = ""
     if (has_question_mark or has_search_keyword) and len(text_content.split()) >= 2:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
-        search_result = await asyncio.to_thread(search_web_real, text_content)
+        search_result = await asyncio.to_thread(search_web_real_sync, text_content)
         if search_result:
             web_context = f"\n\n[ДАННЫЕ ИЗ СЕТИ]:\n{search_result}"
 
@@ -412,15 +412,15 @@ async def process_user_message_async(message: types.Message):
 
     reply_text = None
     
-    # 1. ШТАТНЫЙ РЕЖИМ (БЕЗ ЛИМИТА): Мгновенный ответ за миллисекунды
+    # 1. ШТАТНЫЙ РЕЖИМ (БЕЗ ЛИМИТА): Мгновенный ответ с первой попытки за миллисекунды
     for model_name in TEXT_MODELS:
         reply_text = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload)
         if reply_text:
             break
 
-    # 2. РЕЖИМ ЛИМИТА: МГНОВЕННЫЙ СБРОС ИСТОРИИ И БЕСКОНЕЧНЫЙ ШТУРМ БЕЗ ЕДИНОЙ СЕКУНДЫ ПАУЗЫ
+    # 2. РЕЖИМ ЛИМИТА: МГНОВЕННЫЙ СБРОС ИСТОРИИ И БЕСКОНЕЧНЫЙ ШТУРМ БЕЗ ПАУЗ ДО ПОБЕДНОГО
     if not reply_text:
-        logging.info(f"⚡ ЖЕСТКИЙ ЛИМИТ В ЧАТЕ {chat_id}! Бесконечный штурм без пауз.")
+        logging.info(f"⚡ РЕАЛЬНЫЙ ЛИМИТ В ЧАТЕ {chat_id}! Сброс истории и безумный штурм.")
         chat_history[chat_id] = []
         
         clean_payload = [
@@ -458,4 +458,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+            
