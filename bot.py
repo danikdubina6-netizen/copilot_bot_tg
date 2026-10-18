@@ -36,7 +36,7 @@ TEXT_MODELS = [
     "openai/gpt-oss-20b"
 ]
 
-# Отдельный пул моделей с поддержкой мультимодального ввода (Vision для картинок)
+# Пул моделей для картинок (Vision)
 VISION_MODELS = [
     "qwen/qwen3.8-27b",
     "llama-3.2-90b-vision-preview",
@@ -132,8 +132,8 @@ def fetch_completion_sync(model_name, messages):
         response = groq_client.chat.completions.create(model=model_name, messages=messages, max_tokens=1000)
         if response.choices and response.choices[0].message.content:
             return response.choices[0].message.content
-    except Exception:
-        pass
+    except Exception as e:
+        logging.error(f"Ошибка модели {model_name}: {e}")
     return None
 
 @dp.message(CommandStart())
@@ -188,7 +188,7 @@ async def process_user_message_async(message: types.Message):
         chat_history[chat_id] = []
 
     # ==========================================
-    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО (ЧЕРЕЗ VISION МОДЕЛИ)
+    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО (VISION ШТУРМ)
     # ==========================================
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
@@ -201,7 +201,7 @@ async def process_user_message_async(message: types.Message):
             raw_bytes = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
             base64_image = base64.b64encode(raw_bytes).decode("utf-8")
 
-            prompt_text = text_content if text_content else "Подробно опиши, что изображено на этой фотографии, и прокомментируй!"
+            prompt_text = text_content if text_content else "Опиши, что на этой картинке, и прокомментируй."
 
             vision_messages = [
                 {"role": "system", "content": chat_custom_instructions[chat_id]},
@@ -220,22 +220,21 @@ async def process_user_message_async(message: types.Message):
             ]
 
             while not reply_text:
-                tasks = [asyncio.to_thread(fetch_completion_sync, model_name, vision_messages) for model_name in VISION_MODELS]
-                results = await asyncio.gather(*tasks)
-                for res in results:
-                    if res:
-                        reply_text = res
+                for model_name in VISION_MODELS:
+                    reply_text = await asyncio.to_thread(fetch_completion_sync, model_name, vision_messages)
+                    if reply_text:
                         break
                 if reply_text:
                     break
-                await asyncio.sleep(0)
+                await asyncio.sleep(1)
 
         except Exception as e:
-            logging.error(f"Критическая ошибка обработки фото: {e}")
+            logging.error(f"Критическая ошибка загрузки фото: {e}")
 
+        final_reply = reply_text or "Не удалось обработать картинку через серверы."
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
-        chat_history[chat_id].append({"role": "assistant", "content": reply_text or "Не удалось распознать фото."})
-        processed_text = clean_text_for_telegram(reply_text or "Не удалось распознать фото.")
+        chat_history[chat_id].append({"role": "assistant", "content": final_reply})
+        processed_text = clean_text_for_telegram(final_reply)
         await message.reply(processed_text, parse_mode="HTML")
         return
 
@@ -471,3 +470,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
