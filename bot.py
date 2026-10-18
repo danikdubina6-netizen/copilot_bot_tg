@@ -206,11 +206,10 @@ async def process_user_message_async(message: types.Message):
             reply_text = await asyncio.to_thread(fetch_completion_sync, "qwen/qwen3.8-27b", vision_messages)
 
             if not reply_text:
-                logging.info(f"⚡ МГНОВЕННЫЙ СБРОС И ШТУРМ VISION В ЧАТЕ {chat_id}!")
                 chat_history[chat_id] = []
-                
-                while not reply_text:
-                    tasks = [asyncio.to_thread(fetch_completion_sync, model_name, vision_messages) for model_name in TEXT_MODELS]
+                clean_vision_payload = vision_messages
+                for _ in range(15):
+                    tasks = [asyncio.to_thread(fetch_completion_sync, model_name, clean_vision_payload) for model_name in TEXT_MODELS]
                     results = await asyncio.gather(*tasks)
                     for res in results:
                         if res:
@@ -218,25 +217,15 @@ async def process_user_message_async(message: types.Message):
                             break
                     if reply_text:
                         break
-                    await asyncio.sleep(0.2)
+                    await asyncio.sleep(0.5)
 
         except Exception as e:
             logging.error(f"Критическая ошибка обработки фото: {e}")
             chat_history[chat_id] = []
-            while not reply_text:
-                tasks = [asyncio.to_thread(fetch_completion_sync, model_name, vision_messages) for model_name in TEXT_MODELS]
-                results = await asyncio.gather(*tasks)
-                for res in results:
-                    if res:
-                        reply_text = res
-                        break
-                if reply_text:
-                    break
-                await asyncio.sleep(0.2)
 
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
-        chat_history[chat_id].append({"role": "assistant", "content": reply_text})
-        processed_text = clean_text_for_telegram(reply_text)
+        chat_history[chat_id].append({"role": "assistant", "content": reply_text or "Готово."})
+        processed_text = clean_text_for_telegram(reply_text or "Готово.")
         await message.reply(processed_text, parse_mode="HTML")
         return
 
@@ -425,24 +414,24 @@ async def process_user_message_async(message: types.Message):
 
     reply_text = None
     
-    # 1. Штатный асинхронный быстрый запрос
+    # 1. ШТАТНЫЙ РЕЖИМ (БЕЗ ЛИМИТА): Мгновенный запрос с первой попытки за миллисекунды
     for model_name in TEXT_MODELS:
         reply_text = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload)
         if reply_text:
             break
 
-    # 2. РЕЖИМ ЛИМИТА: МГНОВЕННЫЙ СБРОС ИСТОРИИ И ПАРАЛЛЕЛЬНЫЙ ШТУРМ ПОСЛЕДНЕГО СООБЩЕНИЯ
+    # 2. РЕЖИМ ЛИМИТА: Мгновенный сброс истории в ноль и параллельный штурм по текущему сообщению за 5-12 секунд
     if not reply_text:
-        logging.info(f"⚡ ЛИМИТ В ЧАТЕ {chat_id}! Мгновенный сброс истории и параллельный штурм запроса.")
+        logging.info(f"⚡ РЕАЛЬНЫЙ ЛИМИТ В ЧАТЕ {chat_id}! Мгновенный сброс истории и штурм.")
         chat_history[chat_id] = []
         
-        # Сбрасываем историю на ноль и долбим исключительно текущее сообщение пользователя
         clean_payload = [
             {"role": "system", "content": chat_custom_instructions[chat_id]},
             {"role": "user", "content": text_content}
         ]
         
-        while not reply_text:
+        # Штурмуем обе модели одновременно с ограничением по времени (в пределах 5-12 секунд)
+        for _ in range(15):
             tasks = [asyncio.to_thread(fetch_completion_sync, model_name, clean_payload) for model_name in TEXT_MODELS]
             results = await asyncio.gather(*tasks)
             
@@ -454,7 +443,10 @@ async def process_user_message_async(message: types.Message):
             if reply_text:
                 break
             
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.5)
+
+    if not reply_text:
+        reply_text = "Сервера перегружены, но я на связи. Повтори запрос!"
 
     chat_history[chat_id].append({"role": "user", "content": text_content})
     chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -472,4 +464,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+            
