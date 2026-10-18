@@ -160,7 +160,7 @@ async def handle_ai_response(message: types.Message):
         chat_history[chat_id] = []
 
     # ==========================================
-    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО (С СБРОСОМ ИСТОРИИ И БЕСКОНЕЧНЫМ ПРОБОЕМ)
+    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО (БЕЗ ЗАГЛУШЕК, С БЕСКОНЕЧНЫМ ПРОБОЕМ)
     # ==========================================
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
@@ -191,7 +191,7 @@ async def handle_ai_response(message: types.Message):
                 }
             ]
 
-            # 1. Штатная попытка запроса к Vision модели
+            # Штатный запрос к Vision модели
             try:
                 response = groq_client.chat.completions.create(
                     model="qwen/qwen3.8-27b",
@@ -203,9 +203,9 @@ async def handle_ai_response(message: types.Message):
             except Exception:
                 pass
 
-            # 2. Лимит по фото: мгновенный сброс истории и бесконечный цикл пробития
+            # Лимит по фото: сброс истории и бесконечный цикл без автоответчиков
             if not reply_text:
-                logging.info(f"⚡ ЛИМИТ VISION В ЧАТЕ {chat_id}! Сброс истории и запуск бесконечного цикла запросов по фото.")
+                logging.info(f"⚡ ЛИМИТ VISION В ЧАТЕ {chat_id}! Сброс истории и запуск бесконечного цикла по фото.")
                 chat_history[chat_id] = []
                 
                 while not reply_text:
@@ -466,7 +466,7 @@ async def handle_ai_response(message: types.Message):
     processed_text = clean_text_for_telegram(reply_text)
     
     try:
-        await message.reply(html.escape(processed_text), parse_mode="HTML")
+        await message.reply(processed_text), parse_mode="HTML")
 
 async def main():
     print(">>> Copilot AI запущен! <<<")
