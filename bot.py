@@ -368,6 +368,9 @@ async def process_user_message_async(message: types.Message):
             await message.reply(f"⚠️ Ошибка озвучки: {e}")
             return
 
+    # ==========================================
+    # ГЕНЕРАЦИЯ КАРТИНКИ (ТОЧНАЯ ФИЛЬТРАЦИЯ И ПЕРЕВОД ПРОМПТА)
+    # ==========================================
     if any(trig in lower_text for trig in ["сгенерируй", "нарисуй", "создай картинку", "аватарка", "изображение"]):
         clean_prompt = text_content
         for trig in ["сгенерируй", "нарисуй", "создай картинку", "создай", "изображение", "картинку", "аватарка", "где"]:
@@ -383,7 +386,15 @@ async def process_user_message_async(message: types.Message):
                 fetch_completion_sync,
                 "llama-3.3-70b-versatile",
                 [
-                    {"role": "system", "content": "Translate the user query into a concise image generation prompt in English. Output ONLY English text."},
+                    {
+                        "role": "system", 
+                        "content": (
+                            "You are an expert Image Generation Prompt Creator. Translate the user's prompt to English. "
+                            "If the user says 'без человека' or 'without people', describe ONLY the main object directly "
+                            "(e.g. 'Tesla car parked alone, empty street, no humans'). "
+                            "Output ONLY the final concise English prompt text."
+                        )
+                    },
                     {"role": "user", "content": clean_prompt}
                 ]
             )
@@ -406,7 +417,7 @@ async def process_user_message_async(message: types.Message):
         return
 
     # ==========================================
-    # ТОЧЕЧНЫЙ УМНЫЙ ВЕБ-ПОИСК (ОБНОВЛЕННЫЙ)
+    # ТОЧЕЧНЫЙ УМНЫЙ ВЕБ-ПОИСК
     # ==========================================
     explicit_search_triggers = ["найди", "погугли", "ищи", "загугли", "новости", "курс", "погода", "цена"]
     info_questions = ["кто такой", "что такое", "когда был", "где находится", "сколько стоит", "какой состав"]
