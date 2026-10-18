@@ -147,7 +147,6 @@ async def handle_ai_response(message: types.Message):
     text_content = message.text or message.caption or ""
     now = time.time()
 
-    # Очистка если не писали 6 часов
     if chat_id in chat_last_interaction:
         if now - chat_last_interaction[chat_id] > (AUTO_CLEAR_HOURS * 3600):
             chat_history[chat_id] = []
@@ -361,7 +360,6 @@ async def handle_ai_response(message: types.Message):
     if not text_content:
         return
 
-    # Поиск по триггерам
     search_triggers = [
         "кто", "что", "когда", "где", "почему", "зачем", "как", "сколько", 
         "найди", "погугли", "ищи", "новости", "курс", "погода", "цена", 
@@ -388,9 +386,8 @@ async def handle_ai_response(message: types.Message):
 
     reply_text = None
     
-    # ЖЕСТКИЙ ЗАЩИЩЕННЫЙ БЛОК ГЕНЕРАЦИИ С АВТОСБРОСОМ И ГАРАНТИРОВАННЫМ ОТВЕТОМ
     try:
-        # Попытка 1: С историей
+        # Попытка 1: С историей чата
         for model_name in TEXT_MODELS:
             try:
                 response = groq_client.chat.completions.create(model=model_name, messages=messages_payload, max_tokens=600)
@@ -401,36 +398,57 @@ async def handle_ai_response(message: types.Message):
                 logging.warning(f"Сбой с историей на {model_name}: {e}")
                 continue
 
-        # Если лимит / ошибка — МГНОВЕННО СТИРАЕМ ИСТОРИЮ И ОТВЕЧАЕМ НА ЭТО ЖЕ СООБЩЕНИЕ
+        # Попытка 2: Мгновенный сброс истории и запуск цикла до 5 попыток пробития лимита
         if not reply_text:
-            logging.info(f"⚡ СРАБОТАЛ СБРОС ЛИМИТА В ЧАТЕ {chat_id}! Очищаем историю и отвечаем.")
-            chat_history[chat_id] = [] # Полный сброс
+            logging.info(f"⚡ ЛИМИТ В ЧАТЕ {chat_id}! Мгновенный сброс истории и запуск цикла до 5 попыток.")
+            chat_history[chat_id] = []
             
             clean_payload = [
                 {"role": "system", "content": chat_custom_instructions[chat_id]},
                 {"role": "user", "content": text_content + web_context}
             ]
             
-            for model_name in TEXT_MODELS:
-                try:
-                    response = groq_client.chat.completions.create(model=model_name, messages=clean_payload, max_tokens=500)
-                    if response.choices and response.choices[0].message.content:
-                        reply_text = response.choices[0].message.content
-                        break
-                except Exception as e:
-                    logging.error(f"Ошибка чистого запроса на {model_name}: {e}")
-                    continue
+            for attempt in range(1, 6):
+                for model_name in TEXT_MODELS:
+                    try:
+                        response = groq_client.chat.completions.create(model=model_name, messages=clean_payload, max_tokens=500)
+                        if response.choices and response.choices[0].message.content:
+                            reply_text = response.choices[0].message.content
+                            break
+                    except Exception as e:
+                        logging.warning(f"Попытка {attempt}/5 на {model_name} отклонена лимитом: {e}")
+                        continue
+                
+                if reply_text:
+                    break
+                
+                if attempt < 5:
+                    await asyncio.sleep(0.8)
 
-        # Крайняя аварийная страховка (если все модели легли)
+        # Жесткая страховка
         if not reply_text:
-            reply_text = "На связи! Продолжаем разговор."
+            emergency_payload = [
+                {"role": "system", "content": "Ты Copilot AI. Отвечай коротко и по делу на русском языке."},
+                {"role": "user", "content": text_content}
+            ]
+            response = groq_client.chat.completions.create(model="llama-3.3-70b-versatile", messages=emergency_payload, max_tokens=300)
+            if response.choices and response.choices[0].message.content:
+                reply_text = response.choices[0].message.content
 
     except Exception as fatal_err:
-        logging.error(f"ФАТАЛЬНАЯ ОШИБКА ОБРАБОТКИ: {fatal_err}")
+        logging.error(f"ФАТАЛЬНАЯ ОШИБКА: {fatal_err}")
         chat_history[chat_id] = []
-        reply_text = "Тут! На чем мы остановились?"
+        try:
+            resp = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": text_content}],
+                max_tokens=300
+            )
+            reply_text = resp.choices[0].message.content
+        except Exception as e:
+            logging.error(f"Абсолютный сбой генерации: {e}")
+            reply_text = "На связи! Продолжаем."
 
-    # ГАРАНТИРОВАННАЯ ОТПРАВКА ОТВЕТА В ЧАТ (НИ ОДНО СООБЩЕНИЕ НЕ БУДЕТ ПРОПУЩЕНО)
     chat_history[chat_id].append({"role": "user", "content": text_content})
     chat_history[chat_id].append({"role": "assistant", "content": reply_text})
     processed_text = clean_text_for_telegram(reply_text)
@@ -438,12 +456,8 @@ async def handle_ai_response(message: types.Message):
     try:
         await message.reply(processed_text, parse_mode="HTML")
     except Exception as e:
-        logging.error(f"Ошибка отправки HTML в Telegram: {e}")
-        try:
-            await message.reply(html.escape(processed_text), parse_mode="HTML")
-        except Exception as final_fail:
-            logging.error(f"Критический сбой отправки: {final_fail}")
-            await message.reply("На связи!")
+        logging.error(f"Ошибка отправки HTML: {e}")
+        await message.reply(html.escape(processed_text), parse_mode="HTML")
 
 async def main():
     print(">>> Copilot AI запущен! <<<")
@@ -451,3 +465,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+        
