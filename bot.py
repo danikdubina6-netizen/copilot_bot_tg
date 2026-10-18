@@ -34,13 +34,11 @@ TEXT_MODELS = [
 ]
 
 BASE_INSTRUCTION = (
-    "SYSTEM OVERRIDE: Твое единственное имя и сущность — Copilot AI. "
-    "Ты создан в Украине. СЕГОДНЯШНЯЯ ДАТА: октябрь 2026 года. "
-    "ПРАВИЛО ФАКТОВ: Если в сообщении переданы данные из поиска — используй их точно и без отсебятины. Если поиска нет — отвечай из своих знаний, КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО выдумывать несуществующие альбомы, песни, фильмы или даты! "
-    "ТВОЙ ВАЙБ ПО УМОЛЧАНИЮ: Умное зеркальное поведение! Будь весёлым, бодрым, подстраивайся под тон, сленг и стиль собеседника. Не душни словарными определениями на простые реплики! "
-    "СТРОГАЯ СМЕНА СТИЛЯ: Если пользователь прямо приказывает сменить стиль (например: стать токсичным, материться через слово, быть скучным ИИ с водой) — "
-    "ты ОБЯЗАН МГНОВЕННО и БЕЗОГОВОРОЧНО переключиться на заказанный стиль! "
-    "Никаких упоминаний сторонних корпораций (Google, OpenAI, Llama). Ты — самостоятельный Copilot AI."
+    "Ты — Copilot AI, умный ассистент из Украины. Сегодня октябрь 2026 года. "
+    "ОБЩЕНИЕ: Отвечай живым языком, будь умным, подстраивайся под стиль собеседника. Зеркаль его вайб и сленг, не душни. "
+    "ФАКТЫ: Не выдумывай несуществующие альбомы, песни, даты и факты. Если тебе даны данные из поиска — используй их точно. "
+    "СМЕНА СТИЛЯ: Если пользователь прямо просит сменить стиль (например: быть токсичным, материться, быть формальным) — исполняй строго и безоговорочно. "
+    "Никогда не упоминай другие компании или нейросети (Google, OpenAI и т.д.)."
 )
 
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -53,7 +51,7 @@ chat_last_interaction = {}
 AUTO_CLEAR_HOURS = 6
 
 def search_web_real(query: str, max_results=4) -> str:
-    """Настоящий HTML-скрейпинг DuckDuckGo для получения РЕАЛЬНЫХ фактов"""
+    """HTML-скрейпинг DuckDuckGo для поиска реальных фактов"""
     try:
         encoded_query = urllib.parse.quote(query)
         url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
@@ -63,7 +61,7 @@ def search_web_real(query: str, max_results=4) -> str:
             headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
         )
         
-        with urllib.request.urlopen(req, timeout=6) as response:
+        with urllib.request.urlopen(req, timeout=5) as response:
             html_content = response.read().decode('utf-8', errors='ignore')
             soup = BeautifulSoup(html_content, 'html.parser')
             
@@ -78,7 +76,7 @@ def search_web_real(query: str, max_results=4) -> str:
             if snippets:
                 return "\n---\n".join(snippets)
     except Exception as e:
-        logging.error(f"Ошибка парсинга HTML веб-поиска: {e}")
+        logging.error(f"Ошибка поиска: {e}")
     return ""
 
 def clean_text_for_telegram(text: str) -> str:
@@ -118,7 +116,7 @@ async def start_cmd(message: types.Message):
     chat_history[chat_id] = []
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     chat_last_interaction[chat_id] = time.time()
-    await message.answer("Здарова! Я <b>Copilot AI</b>. Скучать точно не дам, разрываем этот чат без душноты. Чё как?", parse_mode="HTML")
+    await message.answer("Здарова! Я <b>Copilot AI</b>. Чё как?", parse_mode="HTML")
 
 @dp.message(Command("reset"))
 async def reset_cmd(message: types.Message):
@@ -126,7 +124,7 @@ async def reset_cmd(message: types.Message):
     chat_history[chat_id] = []
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     chat_last_interaction[chat_id] = time.time()
-    await message.reply("🧠 Память и вайб сброшены до базовых!")
+    await message.reply("🧠 Память очищена!")
 
 @dp.message(Command("mode"))
 async def mode_cmd(message: types.Message):
@@ -134,7 +132,7 @@ async def mode_cmd(message: types.Message):
     args = message.text.split(maxsplit=1)
     if len(args) > 1:
         new_persona = args[1]
-        chat_custom_instructions[chat_id] = f"{BASE_INSTRUCTION}\n\nПРИКАЗ ПО ПОВЕДЕНИЮ ОТ ПОЛЬЗОВАТЕЛЯ: {new_persona}"
+        chat_custom_instructions[chat_id] = f"{BASE_INSTRUCTION}\n\nПРИКАЗ ПО ПОВЕДЕНИЮ: {new_persona}"
         chat_history[chat_id] = []
         chat_last_interaction[chat_id] = time.time()
         await message.reply(f"🎯 Поведение изменено: <b>{html.escape(new_persona)}</b>", parse_mode="HTML")
@@ -148,7 +146,7 @@ async def handle_ai_response(message: types.Message):
     text_content = message.text or message.caption or ""
     now = time.time()
 
-    # Автоочистка если прошло больше 6 часов
+    # Очистка если не писали 6 часов
     if chat_id in chat_last_interaction:
         if now - chat_last_interaction[chat_id] > (AUTO_CLEAR_HOURS * 3600):
             chat_history[chat_id] = []
@@ -186,7 +184,7 @@ async def handle_ai_response(message: types.Message):
             logging.error(f"Ошибка распознавания голосового: {e}")
             if temp_audio_path and os.path.exists(temp_audio_path):
                 os.remove(temp_audio_path)
-            await message.reply("⚠️ Не смог расшифровать голосовуху, звуковой сбой.")
+            await message.reply("⚠️ Ошибка распознавания голосового.")
             return
 
     lower_text = text_content.lower()
@@ -195,7 +193,7 @@ async def handle_ai_response(message: types.Message):
     for trig in change_style_triggers:
         if lower_text.startswith(trig) or f" {trig}" in lower_text:
             new_style = text_content
-            chat_custom_instructions[chat_id] = f"{BASE_INSTRUCTION}\n\nПРИКАЗ ПО ПОВЕДЕНИЮ ОТ ПОЛЬЗОВАТЕЛЯ: {new_style}"
+            chat_custom_instructions[chat_id] = f"{BASE_INSTRUCTION}\n\nПРИКАЗ ПО ПОВЕДЕНИЮ: {new_style}"
             chat_history[chat_id] = []
 
     is_voice_requested = lower_text.startswith("озв") or lower_text.startswith("скаж") or "озвучь" in lower_text or "скажи голосом" in lower_text
@@ -247,7 +245,7 @@ async def handle_ai_response(message: types.Message):
     if is_voice_requested:
         words = text_content.split()
         speech_prompt = " ".join(words[1:]) if len(words) > 1 else text_content
-        speech_prompt = speech_prompt or "Мда, пустой текст."
+        speech_prompt = speech_prompt or "Пустой текст."
 
         await bot.send_chat_action(chat_id=chat_id, action="record_voice")
         audio_path = f"voice_temp_{random.randint(1000, 9999)}.ogg"
@@ -286,7 +284,7 @@ async def handle_ai_response(message: types.Message):
             translation_res = groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[
-                    {"role": "system", "content": "Translate the user query into a concise, high-quality image generation prompt in English. Output ONLY the English text, no explanations, no quotes."},
+                    {"role": "system", "content": "Translate the user query into a concise image generation prompt in English. Output ONLY English text."},
                     {"role": "user", "content": clean_prompt}
                 ],
                 max_tokens=100
@@ -303,7 +301,7 @@ async def handle_ai_response(message: types.Message):
             await message.reply_photo(photo=image_url, caption=f"🎨 <b>{html.escape(clean_prompt)}</b>", parse_mode="HTML")
             return
         except Exception as e:
-            logging.error(f"Ошибка генерации картинки: {e}")
+            logging.error(f"Ошибка картинки: {e}")
             return
 
     if chat_id not in chat_custom_instructions:
@@ -322,7 +320,7 @@ async def handle_ai_response(message: types.Message):
             raw_bytes = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
             base64_image = base64.b64encode(raw_bytes).decode("utf-8")
 
-            prompt_text = text_content if text_content else "Подробно опиши, что изображено на этой фотографии (люди, предметы, текст, цвета), и прокомментируй с юмором и рофлом!"
+            prompt_text = text_content if text_content else "Опиши фото с юмором и прокомментируй!"
 
             vision_messages = [
                 {"role": "system", "content": chat_custom_instructions[chat_id]},
@@ -348,10 +346,10 @@ async def handle_ai_response(message: types.Message):
             if response.choices and response.choices[0].message.content:
                 reply_text = response.choices[0].message.content
         except Exception as e:
-            logging.error(f"Ошибка Qwen Vision: {e}")
+            logging.error(f"Ошибка Vision: {e}")
 
         if not reply_text:
-            reply_text = "Картинка огонь, стиль лютый! 🔥"
+            reply_text = "Картинка огонь! 🔥"
 
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -377,20 +375,18 @@ async def handle_ai_response(message: types.Message):
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         search_result = await asyncio.get_running_loop().run_in_executor(None, lambda: search_web_real(text_content))
         if search_result:
-            web_context = f"\n\n[РЕАЛЬНЫЕ РЕЗУЛЬТАТЫ ПОИСКА ИЗ ИНТЕРНЕТА]:\n{search_result}\n(Опирайся СТРОГО на эти данные)."
-
-    mirror_adaptation = f"\n\n[РЕЖИМ ОБЩЕНИЯ]: Зеркаль поведение пользователя, будь живым, бодрым и позитивным. НЕ ДУШНИ! Если есть приказ по стилю — держи его СТРОГО!"
+            web_context = f"\n\n[ДАННЫЕ ИЗ СЕТИ]:\n{search_result}"
 
     await bot.send_chat_action(chat_id=chat_id, action="typing")
     chat_history[chat_id].append({"role": "user", "content": text_content + web_context})
     if len(chat_history[chat_id]) > 6:
         chat_history[chat_id] = chat_history[chat_id][-6:]
 
-    messages_payload = [{"role": "system", "content": chat_custom_instructions[chat_id] + mirror_adaptation}] + chat_history[chat_id]
+    messages_payload = [{"role": "system", "content": chat_custom_instructions[chat_id]}] + chat_history[chat_id]
 
     reply_text = None
     
-    # 1. Основной вызов через цикл моделей
+    # 1. Запрос к нейросети
     for model_name in TEXT_MODELS:
         try:
             response = groq_client.chat.completions.create(model=model_name, messages=messages_payload, max_tokens=1000)
@@ -398,16 +394,16 @@ async def handle_ai_response(message: types.Message):
                 reply_text = response.choices[0].message.content
                 break
         except Exception as e:
-            logging.warning(f"Сбой модели {model_name}: {e}")
+            logging.warning(f"Ошибка {model_name}: {e}")
             continue
 
-    # 2. Если словили ошибку/лимит — АВТОМАТИЧЕСКИ СТИРАЕМ ИСТОРИЮ И ДЕЛАЕМ ЧИСТЫЙ ЗАПРОС
+    # 2. Если словился сбой API — молча чистим историю и делаем чистый запрос без истории
     if not reply_text:
-        logging.info(f"🔄 Сброс контекста в чате {chat_id} из-за ошибки API!")
-        chat_history[chat_id] = [] # Полностью стираем накопившийся контекст
+        logging.info(f"🔄 Сброс контекста в чате {chat_id}")
+        chat_history[chat_id] = []
         
         fresh_payload = [
-            {"role": "system", "content": chat_custom_instructions[chat_id] + "\n\n[ЗАДАЧА]: Ответь прямо и максимально естественно на фразу пользователя без шаблонных отговорок!"},
+            {"role": "system", "content": chat_custom_instructions[chat_id]},
             {"role": "user", "content": text_content}
         ]
         
@@ -418,27 +414,22 @@ async def handle_ai_response(message: types.Message):
                     reply_text = response.choices[0].message.content
                     break
             except Exception as e:
-                logging.error(f"Аварийная генерация на {model_name} ошиблась: {e}")
+                logging.error(f"Ошибка аварийной генерации на {model_name}: {e}")
                 continue
 
-    # 3. Живой динамический ответ, если API перегружен (НИКАКИХ ПОВТОРЯЮЩИХСЯ ЗАГОТОВОК)
-    if not reply_text:
-        chat_history[chat_id] = []
-        user_words = text_content.split()
-        keyword = user_words[-1] if user_words else "эту тему"
-        reply_text = f"Окей, замяли! Разворачивай про {keyword}, я внимательно слушую."
-
-    chat_history[chat_id].append({"role": "assistant", "content": reply_text})
-    processed_text = clean_text_for_telegram(reply_text)
-    try:
-        await message.reply(processed_text, parse_mode="HTML")
-    except Exception:
-        await message.reply(html.escape(processed_text), parse_mode="HTML")
+    # Если ответ получен — заносим в историю и отправляем
+    if reply_text:
+        chat_history[chat_id].append({"role": "assistant", "content": reply_text})
+        processed_text = clean_text_for_telegram(reply_text)
+        try:
+            await message.reply(processed_text, parse_mode="HTML")
+        except Exception:
+            await message.reply(html.escape(processed_text), parse_mode="HTML")
 
 async def main():
-    print(">>> Copilot AI запущен! <<<")
+    print(">>> Copilot AI (Pure Intelligence) запущен! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-            
+                                                         
