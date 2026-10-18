@@ -1,2 +1,4 @@
-telethon
-python-dateutil
+aiogram==3.13.1
+openai==1.54.3
+gtts==2.5.4
+beautifulsoup4==4.12.3
