@@ -112,7 +112,6 @@ def parse_requested_emoji(text: str) -> str | None:
     return None
 
 def fetch_completion_sync(model_name, messages):
-    """Синхронный вызов Groq API для выполнения в отдельном потоке"""
     try:
         response = groq_client.chat.completions.create(model=model_name, messages=messages, max_tokens=800)
         if response.choices and response.choices[0].message.content:
@@ -152,6 +151,10 @@ async def mode_cmd(message: types.Message):
 
 @dp.message()
 async def handle_ai_response(message: types.Message):
+    # Запускаем обработку каждого сообщения в отдельной фоновой таске, чтобы они не ждали друг друга
+    asyncio.create_task(process_user_message_async(message))
+
+async def process_user_message_async(message: types.Message):
     chat_id = message.chat.id
     chat_type = message.chat.type
     text_content = message.text or message.caption or ""
@@ -201,18 +204,16 @@ async def handle_ai_response(message: types.Message):
                 }
             ]
 
-            # Асинхронный быстрый запрос по фото без блокировки бота
             reply_text = await asyncio.to_thread(fetch_completion_sync, "qwen/qwen3.8-27b", vision_messages)
 
-            # Если лимит — асинхронный бесконечный цикл пробития
+            # Бесконечный пробой без пауз для фото
             if not reply_text:
-                logging.info(f"⚡ РЕАЛЬНЫЙ ЛИМИТ VISION В ЧАТЕ {chat_id}! Сброс истории и запуск параллельного цикла.")
+                logging.info(f"⚡ МОЛНИЕНОСНЫЙ ПРОБОЙ VISION В ЧАТЕ {chat_id}! Сброс истории.")
                 chat_history[chat_id] = []
                 
                 while not reply_text:
                     reply_text = await asyncio.to_thread(fetch_completion_sync, "qwen/qwen3.8-27b", vision_messages)
-                    if not reply_text:
-                        await asyncio.sleep(0.5)
+                    await asyncio.sleep(0)
 
         except Exception as e:
             logging.error(f"Критическая ошибка обработки фото: {e}")
@@ -223,8 +224,7 @@ async def handle_ai_response(message: types.Message):
                     "llama-3.3-70b-versatile", 
                     [{"role": "user", "content": f"Опиши фото: {text_content}"}]
                 )
-                if not reply_text:
-                    await asyncio.sleep(0.5)
+                await asyncio.sleep(0)
 
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -320,7 +320,6 @@ async def handle_ai_response(message: types.Message):
                 message_id=target_msg_id,
                 reaction=[types.ReactionTypeEmoji(emoji=requested_emoji)]
             )
-            return
         except Exception as e:
             logging.error(f"Ошибка реакций: {e}")
 
@@ -418,15 +417,15 @@ async def handle_ai_response(message: types.Message):
 
     reply_text = None
     
-    # 1. Штатный асинхронный быстый запрос
+    # 1. Штатный асинхронный быстрый запрос
     for model_name in TEXT_MODELS:
         reply_text = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload)
         if reply_text:
             break
 
-    # 2. Режим лимита: сброс истории и бесконечный параллельный цикл
+    # 2. Режим лимита: СБРОС ИСТОРИИ И МОЛНИЕНОСНЫЙ БЕСКОНЕЧНЫЙ ЦИКЛ БЕЗ SLEEP
     if not reply_text:
-        logging.info(f"⚡ РЕАЛЬНЫЙ ЛИМИТ В ЧАТЕ {chat_id}! Сброс истории и запуск параллельного цикла пробития.")
+        logging.info(f"⚡ МОЛНИЕНОСНЫЙ ПРОБОЙ ЛИМИТА В ЧАТЕ {chat_id}! Сброс истории и безумный цикл.")
         chat_history[chat_id] = []
         
         clean_payload = [
@@ -440,8 +439,8 @@ async def handle_ai_response(message: types.Message):
                 if reply_text:
                     break
             
-            if not reply_text:
-                await asyncio.sleep(0.5)
+            # Убираем любые задержки (sleep(0)), чтобы бот лупил запросы с максимальной скоростью процессора
+            await asyncio.sleep(0)
 
     chat_history[chat_id].append({"role": "user", "content": text_content})
     chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -459,4 +458,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-                
+        
