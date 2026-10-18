@@ -35,11 +35,11 @@ TEXT_MODELS = [
 
 BASE_INSTRUCTION = (
     "Ты — Copilot AI. Сегодня октябрь 2026 года. "
-    "ЯЗЫК: Отвечай ИСКЛЮЧИТЕЛЬНО НА РУССКОМ ЯЗЫКЕ! Никакого украинского или английского текста в ответах. "
-    "ОБЩЕНИЕ: Отвечай живым, понятным языком, подстраивайся под стиль собеседника. Зеркаль его вайб и сленг, без душноты и занудства. "
-    "ФАКТЫ: Не выдумывай несуществующие альбомы, песни, даты и факты. Если тебе даны данные из поиска — используй их точно. "
-    "СМЕНА СТИЛЯ: Если пользователь прямо просит сменить стиль (например: быть токсичным, материться, быть формальным) — исполняй строго и безоговорочно. "
-    "Никогда не упоминай другие компании или нейросети (Google, OpenAI и т.д.)."
+    "ЯЗЫК: Отвечай ИСКЛЮЧИТЕЛЬНО НА РУССКОМ ЯЗЫКЕ! Никакого украинского или английского текста. "
+    "ОБЩЕНИЕ: Отвечай живым языком, подстраивайся под сленг и вайб собеседника, не душни. "
+    "ФАКТЫ: Не выдумывай несуществующие факты. Используй поиск, если он передан. "
+    "СМЕНА СТИЛЯ: Если пользователь просит сменить стиль (токсичный, маты и т.д.) — исполняй строго и безоговорочно. "
+    "Никогда не упоминай сторонние компании или нейросети (Google, OpenAI и др.)."
 )
 
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -147,7 +147,7 @@ async def handle_ai_response(message: types.Message):
     text_content = message.text or message.caption or ""
     now = time.time()
 
-    # Очистка контекста если не писали более 6 часов
+    # Очистка если не писали 6 часов
     if chat_id in chat_last_interaction:
         if now - chat_last_interaction[chat_id] > (AUTO_CLEAR_HOURS * 3600):
             chat_history[chat_id] = []
@@ -380,7 +380,6 @@ async def handle_ai_response(message: types.Message):
 
     await bot.send_chat_action(chat_id=chat_id, action="typing")
     
-    # 1. Попытка ответить с сохранением истории
     chat_history[chat_id].append({"role": "user", "content": text_content + web_context})
     if len(chat_history[chat_id]) > 6:
         chat_history[chat_id] = chat_history[chat_id][-6:]
@@ -389,61 +388,62 @@ async def handle_ai_response(message: types.Message):
 
     reply_text = None
     
-    for model_name in TEXT_MODELS:
-        try:
-            response = groq_client.chat.completions.create(model=model_name, messages=messages_payload, max_tokens=600)
-            if response.choices and response.choices[0].message.content:
-                reply_text = response.choices[0].message.content
-                break
-        except Exception as e:
-            logging.warning(f"Ошибка запроса с историей к {model_name}: {e}")
-            continue
-
-    # 2. ЕСЛИ ВЫЛЕЗ ЛИМИТ / ОШИБКА: Мгновенно чистим историю и делаем чистый запрос ТОЛЬКО с этим сообщением!
-    if not reply_text:
-        logging.info(f"⚡ МГНОВЕННЫЙ СБРОС ИСТОРИИ ДЛЯ {chat_id} ИЗ-ЗА ЛИМИТА! Отвечаем напрямую на последнее сообщение.")
-        
-        # Полностью очищаем историю, так как она забила лимит
-        chat_history[chat_id] = []
-        
-        # Одиночный чистый запрос БЕЗ старой истории
-        clean_payload = [
-            {"role": "system", "content": chat_custom_instructions[chat_id]},
-            {"role": "user", "content": text_content + web_context}
-        ]
-        
+    # ЖЕСТКИЙ ЗАЩИЩЕННЫЙ БЛОК ГЕНЕРАЦИИ С АВТОСБРОСОМ И ГАРАНТИРОВАННЫМ ОТВЕТОМ
+    try:
+        # Попытка 1: С историей
         for model_name in TEXT_MODELS:
             try:
-                response = groq_client.chat.completions.create(model=model_name, messages=clean_payload, max_tokens=500)
+                response = groq_client.chat.completions.create(model=model_name, messages=messages_payload, max_tokens=600)
                 if response.choices and response.choices[0].message.content:
                     reply_text = response.choices[0].message.content
                     break
             except Exception as e:
-                logging.error(f"Аварийный одиночный запрос на {model_name} вылетел: {e}")
+                logging.warning(f"Сбой с историей на {model_name}: {e}")
                 continue
 
-    # 3. ЕСЛИ ВСЕ МОДЕЛИ ВРЕИЕННО ЗАНЯТЫ: Делаем еще один легкий вызов с минимальным лимитом токенов
-    if not reply_text:
-        try:
-            minimal_payload = [
-                {"role": "system", "content": "Ты Copilot AI. Ответь коротко и по делу на русском языке."},
-                {"role": "user", "content": text_content}
+        # Если лимит / ошибка — МГНОВЕННО СТИРАЕМ ИСТОРИЮ И ОТВЕЧАЕМ НА ЭТО ЖЕ СООБЩЕНИЕ
+        if not reply_text:
+            logging.info(f"⚡ СРАБОТАЛ СБРОС ЛИМИТА В ЧАТЕ {chat_id}! Очищаем историю и отвечаем.")
+            chat_history[chat_id] = [] # Полный сброс
+            
+            clean_payload = [
+                {"role": "system", "content": chat_custom_instructions[chat_id]},
+                {"role": "user", "content": text_content + web_context}
             ]
-            response = groq_client.chat.completions.create(model="llama-3.3-70b-versatile", messages=minimal_payload, max_tokens=200)
-            if response.choices and response.choices[0].message.content:
-                reply_text = response.choices[0].message.content
-        except Exception as e:
-            logging.error(f"Легкий аварийный запрос ошибся: {e}")
+            
+            for model_name in TEXT_MODELS:
+                try:
+                    response = groq_client.chat.completions.create(model=model_name, messages=clean_payload, max_tokens=500)
+                    if response.choices and response.choices[0].message.content:
+                        reply_text = response.choices[0].message.content
+                        break
+                except Exception as e:
+                    logging.error(f"Ошибка чистого запроса на {model_name}: {e}")
+                    continue
 
-    # Если ответ наконец сгенерирован — добавляем его в свежую историю и отправляем
-    if reply_text:
-        chat_history[chat_id].append({"role": "user", "content": text_content})
-        chat_history[chat_id].append({"role": "assistant", "content": reply_text})
-        processed_text = clean_text_for_telegram(reply_text)
+        # Крайняя аварийная страховка (если все модели легли)
+        if not reply_text:
+            reply_text = "На связи! Продолжаем разговор."
+
+    except Exception as fatal_err:
+        logging.error(f"ФАТАЛЬНАЯ ОШИБКА ОБРАБОТКИ: {fatal_err}")
+        chat_history[chat_id] = []
+        reply_text = "Тут! На чем мы остановились?"
+
+    # ГАРАНТИРОВАННАЯ ОТПРАВКА ОТВЕТА В ЧАТ (НИ ОДНО СООБЩЕНИЕ НЕ БУДЕТ ПРОПУЩЕНО)
+    chat_history[chat_id].append({"role": "user", "content": text_content})
+    chat_history[chat_id].append({"role": "assistant", "content": reply_text})
+    processed_text = clean_text_for_telegram(reply_text)
+    
+    try:
+        await message.reply(processed_text, parse_mode="HTML")
+    except Exception as e:
+        logging.error(f"Ошибка отправки HTML в Telegram: {e}")
         try:
-            await message.reply(processed_text, parse_mode="HTML")
-        except Exception:
             await message.reply(html.escape(processed_text), parse_mode="HTML")
+        except Exception as final_fail:
+            logging.error(f"Критический сбой отправки: {final_fail}")
+            await message.reply("На связи!")
 
 async def main():
     print(">>> Copilot AI запущен! <<<")
@@ -451,4 +451,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-            
