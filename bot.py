@@ -288,19 +288,20 @@ async def process_user_message_async(message: types.Message):
 
     should_answer = True
     if chat_type != "private" and not getattr(message, "business_connection_id", None) and not is_voice_requested:
-        should_answer = False
-        if message.reply_to_message and message.reply_to_message.from_user:
-            if message.reply_to_message.from_user.id == (await bot.get_me()).id:
+        if not message.photo:
+            should_answer = False
+            if message.reply_to_message and message.reply_to_message.from_user:
+                if message.reply_to_message.from_user.id == (await bot.get_me()).id:
+                    should_answer = True
+            if f"@{BOT_USERNAME}".lower() in lower_text:
                 should_answer = True
-        if f"@{BOT_USERNAME}".lower() in lower_text:
-            should_answer = True
-            text_content = text_content.replace(f"@{BOT_USERNAME}", "").strip()
-            
-        if not should_answer:
-            group_message_counters[chat_id] = group_message_counters.get(chat_id, 0) + 1
-            if group_message_counters[chat_id] >= 15:
-                group_message_counters[chat_id] = 0
-                should_answer = True
+                text_content = text_content.replace(f"@{BOT_USERNAME}", "").strip()
+                
+            if not should_answer:
+                group_message_counters[chat_id] = group_message_counters.get(chat_id, 0) + 1
+                if group_message_counters[chat_id] >= 15:
+                    group_message_counters[chat_id] = 0
+                    should_answer = True
 
     if not should_answer:
         return
@@ -469,5 +470,4 @@ async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(main())
-    
+asyncio.run(main())
