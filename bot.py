@@ -369,7 +369,7 @@ async def process_user_message_async(message: types.Message):
             return
 
     # ==========================================
-    # ГЕНЕРАЦИЯ КАРТИНКИ (ИЗОЛИРОВАНА ОТ ИСТОРИИ)
+    # ГЕНЕРАЦИЯ КАРТИНКИ (УМНЫЙ КОНТРОЛЬ ЛЮДЕЙ)
     # ==========================================
     if any(trig in lower_text for trig in ["сгенерируй", "нарисуй", "создай картинку", "аватарка", "изображение"]):
         clean_prompt = text_content
@@ -389,11 +389,10 @@ async def process_user_message_async(message: types.Message):
                     {
                         "role": "system", 
                         "content": (
-                            "You are a strict text-to-image prompt generator. "
-                            "Convert the user prompt into a short, positive English description for Flux Image AI. "
-                            "Rule 1: Ignore any negative words like 'без человека', 'without people', 'no humans' — instead, ONLY describe the main target object (e.g. 'Tesla car parked on a road, empty street, vehicle'). "
-                            "Rule 2: Never add people, women, or characters unless explicitly asked. "
-                            "Output ONLY the clear English image prompt."
+                            "You are a strict text-to-image prompt generator. Translate the user prompt to English. "
+                            "RULE 1: Add humans, people, or characters ONLY if the user's prompt explicitly contains words like 'человек', 'люди', 'девушка', 'парень', 'женщина', 'мужчина', 'person', 'woman', 'man', 'girl', 'boy'. "
+                            "RULE 2: If the prompt is about objects, cars, nature, buildings, or says 'без человека' / 'без людей', you MUST ensure NO humans are in the prompt (add words like 'empty street, solo object, no people'). "
+                            "Output ONLY the final clean English image prompt."
                         )
                     },
                     {"role": "user", "content": clean_prompt}
