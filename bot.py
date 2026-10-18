@@ -49,15 +49,8 @@ dp = Dispatcher()
 chat_history = {}
 chat_custom_instructions = {}
 group_message_counters = {}
-
-# Время последнего взаимодействия для автоочистки каждые 6 часов
 chat_last_interaction = {}
 AUTO_CLEAR_HOURS = 6
-
-# Индивидуальный рейт-лимит строго по CHAT_ID
-chat_rate_limits = {}
-RATE_LIMIT_COUNT = 6
-RATE_LIMIT_PERIOD = 10
 
 def search_web_real(query: str, max_results=4) -> str:
     """Настоящий HTML-скрейпинг DuckDuckGo для получения РЕАЛЬНЫХ фактов"""
@@ -155,7 +148,7 @@ async def handle_ai_response(message: types.Message):
     text_content = message.text or message.caption or ""
     now = time.time()
 
-    # Автоочистка истории чата если прошло больше 6 часов
+    # Автоочистка если прошло более 6 часов
     if chat_id in chat_last_interaction:
         if now - chat_last_interaction[chat_id] > (AUTO_CLEAR_HOURS * 3600):
             chat_history[chat_id] = []
@@ -206,19 +199,6 @@ async def handle_ai_response(message: types.Message):
             chat_history[chat_id] = []
 
     is_voice_requested = lower_text.startswith("озв") or lower_text.startswith("скаж") or "озвучь" in lower_text or "скажи голосом" in lower_text
-
-    # Индивидуальный рейт-лимит строго по chat_id
-    if chat_type == "private":
-        if chat_id not in chat_rate_limits:
-            chat_rate_limits[chat_id] = []
-        
-        chat_rate_limits[chat_id] = [t for t in chat_rate_limits[chat_id] if now - t < RATE_LIMIT_PERIOD]
-        
-        if len(chat_rate_limits[chat_id]) >= RATE_LIMIT_COUNT:
-            await message.reply("⚠️ <b>Порожняк не гони, тормози!</b> Слишком часто пишешь, дай передохнуть пару секунд.", parse_mode="HTML")
-            return
-            
-        chat_rate_limits[chat_id].append(now)
 
     should_answer = False
     if chat_type == "private" or getattr(message, "business_connection_id", None) or is_voice_requested or message.photo:
@@ -382,7 +362,7 @@ async def handle_ai_response(message: types.Message):
     if not text_content:
         return
 
-    # Поиск только при явных вопросах или ключевых словах
+    # Поиск по триггерам
     search_triggers = [
         "кто", "что", "когда", "где", "почему", "зачем", "как", "сколько", 
         "найди", "погугли", "ищи", "новости", "курс", "погода", "цена", 
@@ -399,7 +379,7 @@ async def handle_ai_response(message: types.Message):
         if search_result:
             web_context = f"\n\n[РЕАЛЬНЫЕ РЕЗУЛЬТАТЫ ПОИСКА ИЗ ИНТЕРНЕТА]:\n{search_result}\n(Опирайся СТРОГО на эти данные)."
 
-    mirror_adaptation = f"\n\n[РЕЖИМ ОБЩЕНИЯ]: Зеркаль поведение пользователя, будь живым, бодрым и позитивным. НЕ ДУШНИ и не пиши исторический бред на простые фразы! Если есть явный приказ по стилю — держи его СТРОГО!"
+    mirror_adaptation = f"\n\n[РЕЖИМ ОБЩЕНИЯ]: Зеркаль поведение пользователя, будь живым, бодрым и позитивным. НЕ ДУШНИ! Если есть приказ по стилю — держи его СТРОГО!"
 
     await bot.send_chat_action(chat_id=chat_id, action="typing")
     chat_history[chat_id].append({"role": "user", "content": text_content + web_context})
@@ -412,39 +392,40 @@ async def handle_ai_response(message: types.Message):
     for model_name in TEXT_MODELS:
         try:
             response = groq_client.chat.completions.create(model=model_name, messages=messages_payload, max_tokens=1000)
-            reply_text = response.choices[0].message.content
-            if reply_text:
+            if response.choices and response.choices[0].message.content:
+                reply_text = response.choices[0].message.content
                 break
         except Exception as e:
-            logging.warning(f"Модель {model_name} на модели {model_name} словила лимит/ошибку: {e}")
+            logging.warning(f"Ошибка запроса к {model_name}: {e}")
             continue
 
-    # ЕСЛИ СЛОВИЛИ ЛИМИТ / ОШИБКУ ТОКЕНОВ: молча чистим историю и пробуем ответить свежим запросом без старого контекста
+    # ЕСЛИ ПРОИЗОШЛА ОШИБКА: Автоматический бесшовный сброс истории и повторная генерация
     if not reply_text:
-        logging.info(f"🔄 Сработал лимит API в чате {chat_id}. Выполняем бесшумный автосброс истории и повторный запрос.")
-        chat_history[chat_id] = [{"role": "user", "content": text_content}]
-        messages_payload = [{"role": "system", "content": chat_custom_instructions[chat_id] + mirror_adaptation}, chat_history[chat_id][-1]]
+        logging.info(f"🔄 Автоматический сброс истории в чате {chat_id} для мгновенного восстановления генерации.")
+        chat_history[chat_id] = [] # Очищаем старую историю
+        
+        fresh_payload = [
+            {"role": "system", "content": chat_custom_instructions[chat_id] + mirror_adaptation},
+            {"role": "user", "content": text_content}
+        ]
         
         for model_name in TEXT_MODELS:
             try:
-                response = groq_client.chat.completions.create(model=model_name, messages=messages_payload, max_tokens=800)
-                reply_text = response.choices[0].message.content
-                if reply_text:
+                response = groq_client.chat.completions.create(model=model_name, messages=fresh_payload, max_tokens=800)
+                if response.choices and response.choices[0].message.content:
+                    reply_text = response.choices[0].message.content
                     break
-            except Exception:
+            except Exception as e:
+                logging.error(f"Повторная попытка к {model_name} ошибка: {e}")
                 continue
 
-    # Если даже после сброса апишка лежит — выдаем короткую нейтральную фразу вместо ошибок
-    if not reply_text:
-        chat_history[chat_id] = []
-        reply_text = "На связи! Продолжаем разговор 🚀"
-
-    chat_history[chat_id].append({"role": "assistant", "content": reply_text})
-    processed_text = clean_text_for_telegram(reply_text)
-    try:
-        await message.reply(processed_text, parse_mode="HTML")
-    except Exception:
-        await message.reply(html.escape(processed_text), parse_mode="HTML")
+    if reply_text:
+        chat_history[chat_id].append({"role": "assistant", "content": reply_text})
+        processed_text = clean_text_for_telegram(reply_text)
+        try:
+            await message.reply(processed_text, parse_mode="HTML")
+        except Exception:
+            await message.reply(html.escape(processed_text), parse_mode="HTML")
 
 async def main():
     print(">>> Copilot AI запущен! <<<")
