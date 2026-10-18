@@ -52,7 +52,7 @@ chat_last_interaction = {}
 AUTO_CLEAR_HOURS = 6
 
 def search_web_real(query: str, max_results=3) -> str:
-    """Безопасный веб-поиск без задержек и сбоев"""
+    """Безопасный веб-поиск без сбоев"""
     try:
         encoded_query = urllib.parse.quote(query)
         url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
@@ -386,62 +386,38 @@ async def handle_ai_response(message: types.Message):
 
     reply_text = None
     
-    try:
-        # Штатный режим: мгновенный запрос с историей без задержек
-        for model_name in TEXT_MODELS:
-            try:
-                response = groq_client.chat.completions.create(model=model_name, messages=messages_payload, max_tokens=800)
-                if response.choices and response.choices[0].message.content:
-                    reply_text = response.choices[0].message.content
-                    break
-            except Exception as e:
-                logging.warning(f"Сбой с историей на {model_name}: {e}")
-                continue
-
-        # Режим лимита: мгновенно стираем историю и долбим до 10 запросов подряд без пауз
-        if not reply_text:
-            logging.info(f"⚡ ЛИМИТ В ЧАТЕ {chat_id}! Мгновенный сброс истории и запуск 10 запросов подряд.")
-            chat_history[chat_id] = []
-            
-            clean_payload = [
-                {"role": "system", "content": chat_custom_instructions[chat_id]},
-                {"role": "user", "content": text_content}
-            ]
-            
-            for attempt in range(1, 11):
-                for model_name in TEXT_MODELS:
-                    try:
-                        response = groq_client.chat.completions.create(model=model_name, messages=clean_payload, max_tokens=800)
-                        if response.choices and response.choices[0].message.content:
-                            reply_text = response.choices[0].message.content
-                            break
-                    except Exception:
-                        continue
-                
-                if reply_text:
-                    break
-
-        # Экстренная страховка генерацией через модель
-        if not reply_text:
-            resp = groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "system", "content": "Ты Copilot AI. Отвечай на русском языке."}, {"role": "user", "content": text_content}],
-                max_tokens=500
-            )
-            reply_text = resp.choices[0].message.content
-
-    except Exception as fatal_err:
-        logging.error(f"Критическая ошибка: {fatal_err}")
-        chat_history[chat_id] = []
+    # Штатный режим: мгновенный запрос
+    for model_name in TEXT_MODELS:
         try:
-            resp = groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": text_content}],
-                max_tokens=400
-            )
-            reply_text = resp.choices[0].message.content
+            response = groq_client.chat.completions.create(model=model_name, messages=messages_payload, max_tokens=800)
+            if response.choices and response.choices[0].message.content:
+                reply_text = response.choices[0].message.content
+                break
         except Exception:
-            reply_text = f"Интересный вопрос! Давай обсудим подробнее про {text_content[:25]}."
+            continue
+
+    # Режим лимита: мгновенно стираем историю и запускаем БЕСКОНЕЧНЫЙ цикл запросов, пока модель не ответит
+    if not reply_text:
+        logging.info(f"⚡ ЛИМИТ В ЧАТЕ {chat_id}! Сброс истории и запуск БЕСКОНЕЧНОГО цикла запросов.")
+        chat_history[chat_id] = []
+        
+        clean_payload = [
+            {"role": "system", "content": chat_custom_instructions[chat_id]},
+            {"role": "user", "content": text_content}
+        ]
+        
+        while not reply_text:
+            for model_name in TEXT_MODELS:
+                try:
+                    response = groq_client.chat.completions.create(model=model_name, messages=clean_payload, max_tokens=800)
+                    if response.choices and response.choices[0].message.content:
+                        reply_text = response.choices[0].message.content
+                        break
+                except Exception:
+                    continue
+            
+            if not reply_text:
+                await asyncio.sleep(0.2)
 
     chat_history[chat_id].append({"role": "user", "content": text_content})
     chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -459,4 +435,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+        
