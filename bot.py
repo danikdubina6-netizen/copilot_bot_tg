@@ -36,11 +36,11 @@ TEXT_MODELS = [
     "openai/gpt-oss-20b"
 ]
 
-# Пул моделей для картинок (Vision)
+# Пул моделей для картинок (Vision) — с обновленными рабочими именами
 VISION_MODELS = [
-    "qwen/qwen3.8-27b",
-    "llama-3.2-90b-vision-preview",
-    "llama-3.2-11b-vision-preview"
+    "llama-3.2-11b-vision-instruct",
+    "llama-3.2-90b-vision-instruct",
+    "qwen/qwen3.8-27b"
 ]
 
 BASE_INSTRUCTION = (
@@ -189,7 +189,7 @@ async def process_user_message_async(message: types.Message):
         chat_history[chat_id] = []
 
     # ==========================================
-    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО (МГНОВЕННЫЙ ШТУРМ И ВЫВОД ОШИБОК)
+    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО (МГНОВЕННЫЙ ШТУРМ)
     # ==========================================
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
@@ -236,7 +236,7 @@ async def process_user_message_async(message: types.Message):
             error_logs.append(f"Global Photo Error: {e}")
             logging.error(f"Критическая ошибка загрузки фото: {e}")
 
-        final_reply = reply_text if reply_text else ("❌ СБОЙ ВСЕХ VISION МОДЕЛИ:\n" + "\n".join(error_logs))
+        final_reply = reply_text if reply_text else ("❌ СБОЙ ВСЕХ VISION МОДЕЛЕЙ:\n" + "\n".join(error_logs))
         
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
         chat_history[chat_id].append({"role": "assistant", "content": final_reply})
@@ -462,7 +462,7 @@ async def process_user_message_async(message: types.Message):
             
             await asyncio.sleep(0)
 
-    chat_history[chat_id].append({"role": "user", "content": text_content})
+    chat_history[chat_id].append({"role": "user", "content": text__content})
     chat_history[chat_id].append({"role": "assistant", "content": reply_text})
     processed_text = clean_text_for_telegram(reply_text)
     
