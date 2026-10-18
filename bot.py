@@ -310,9 +310,11 @@ async def handle_ai_response(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
+    # ОБРАБОТКА ФОТО (С БЕСКОНЕЧНЫМ ЦИКЛОМ)
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         reply_text = None
+        
         try:
             photo = message.photo[-1]
             photo_file = await bot.get_file(photo.file_id)
@@ -320,7 +322,7 @@ async def handle_ai_response(message: types.Message):
             raw_bytes = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
             base64_image = base64.b64encode(raw_bytes).decode("utf-8")
 
-            prompt_text = text_content if text_content else "Опиши фото с юмором и прокомментируй!"
+            prompt_text = text_content if text_content else "Подробно опиши, что изображено на этой фотографии, и прокомментируй с юмором!"
 
             vision_messages = [
                 {"role": "system", "content": chat_custom_instructions[chat_id]},
@@ -338,18 +340,47 @@ async def handle_ai_response(message: types.Message):
                 }
             ]
 
-            response = groq_client.chat.completions.create(
-                model="qwen/qwen3.8-27b",
-                messages=vision_messages,
-                max_tokens=800
-            )
-            if response.choices and response.choices[0].message.content:
-                reply_text = response.choices[0].message.content
-        except Exception as e:
-            logging.error(f"Ошибка Vision: {e}")
+            # 1. Штатный запрос к Vision
+            try:
+                response = groq_client.chat.completions.create(
+                    model="qwen/qwen3.8-27b",
+                    messages=vision_messages,
+                    max_tokens=800
+                )
+                if response.choices and response.choices[0].message.content:
+                    reply_text = response.choices[0].message.content
+            except Exception:
+                pass
 
-        if not reply_text:
-            reply_text = "Картинка огонь! 🔥"
+            # 2. Бесконечный цикл при лимите/сбое модели описания фото
+            if not reply_text:
+                logging.info(f"⚡ ЛИМИТ VISION В ЧАТЕ {chat_id}! Запуск бесконечного цикла запросов.")
+                while not reply_text:
+                    try:
+                        response = groq_client.chat.completions.create(
+                            model="qwen/qwen3.8-27b",
+                            messages=vision_messages,
+                            max_tokens=800
+                        )
+                        if response.choices and response.choices[0].message.content:
+                            reply_text = response.choices[0].message.content
+                            break
+                    except Exception:
+                        await asyncio.sleep(0.2)
+
+        except Exception as e:
+            logging.error(f"Критическая ошибка обработки фото: {e}")
+            while not reply_text:
+                try:
+                    resp = groq_client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[{"role": "user", "content": f"Опиши фото: {text_content}"}],
+                        max_tokens=500
+                    )
+                    if resp.choices and resp.choices[0].message.content:
+                        reply_text = resp.choices[0].message.content
+                except Exception:
+                    await asyncio.sleep(0.2)
 
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
@@ -386,7 +417,7 @@ async def handle_ai_response(message: types.Message):
 
     reply_text = None
     
-    # Штатный режим: мгновенный запрос
+    # Штатный режим: мгновенный запрос без задержек
     for model_name in TEXT_MODELS:
         try:
             response = groq_client.chat.completions.create(model=model_name, messages=messages_payload, max_tokens=800)
@@ -396,9 +427,9 @@ async def handle_ai_response(message: types.Message):
         except Exception:
             continue
 
-    # Режим лимита: мгновенно стираем историю и запускаем БЕСКОНЕЧНЫЙ цикл запросов, пока модель не ответит
+    # Режим лимита: мгновенный сброс истории и бесконечный цикл
     if not reply_text:
-        logging.info(f"⚡ ЛИМИТ В ЧАТЕ {chat_id}! Сброс истории и запуск БЕСКОНЕЧНОГО цикла запросов.")
+        logging.info(f"⚡ ЛИМИТ В ЧАТЕ {chat_id}! Сброс истории и запуск бесконечного цикла запросов.")
         chat_history[chat_id] = []
         
         clean_payload = [
@@ -435,4 +466,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-        
+    
