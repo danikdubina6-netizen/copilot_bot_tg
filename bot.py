@@ -160,7 +160,7 @@ async def handle_ai_response(message: types.Message):
         chat_history[chat_id] = []
 
     # ==========================================
-    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО (БЕЗ ЗАГЛУШЕК, С БЕСКОНЕЧНЫМ ПРОБОЕМ)
+    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО
     # ==========================================
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
@@ -191,7 +191,6 @@ async def handle_ai_response(message: types.Message):
                 }
             ]
 
-            # Штатный запрос к Vision модели
             try:
                 response = groq_client.chat.completions.create(
                     model="qwen/qwen3.8-27b",
@@ -203,7 +202,6 @@ async def handle_ai_response(message: types.Message):
             except Exception:
                 pass
 
-            # Лимит по фото: сброс истории и бесконечный цикл без автоответчиков
             if not reply_text:
                 logging.info(f"⚡ ЛИМИТ VISION В ЧАТЕ {chat_id}! Сброс истории и запуск бесконечного цикла по фото.")
                 chat_history[chat_id] = []
@@ -428,7 +426,6 @@ async def handle_ai_response(message: types.Message):
 
     reply_text = None
     
-    # Штатный режим: мгновенный запрос
     for model_name in TEXT_MODELS:
         try:
             response = groq_client.chat.completions.create(model=model_name, messages=messages_payload, max_tokens=800)
@@ -438,7 +435,6 @@ async def handle_ai_response(message: types.Message):
         except Exception:
             continue
 
-    # Режим лимита: мгновенный сброс истории и бесконечный цикл запросов
     if not reply_text:
         logging.info(f"⚡ ЛИМИТ В ЧАТЕ {chat_id}! Сброс истории и запуск бесконечного цикла запросов.")
         chat_history[chat_id] = []
@@ -466,11 +462,14 @@ async def handle_ai_response(message: types.Message):
     processed_text = clean_text_for_telegram(reply_text)
     
     try:
-        await message.reply(processed_text), parse_mode="HTML")
+        await message.reply(processed_text, parse_mode="HTML")
+    except Exception as e:
+        logging.error(f"Ошибка отправки HTML: {e}")
+        await message.reply(html.escape(processed_text), parse_mode="HTML")
 
 async def main():
     print(">>> Copilot AI запущен! <<<")
     await dp.start_polling(bot)
 
-if __name__ == "__main__":
+if __name___ == "__main__":
     asyncio.run(main())
