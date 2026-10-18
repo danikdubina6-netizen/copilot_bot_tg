@@ -471,5 +471,5 @@ async def main():
     print(">>> Copilot AI запущен! <<<")
     await dp.start_polling(bot)
 
-if __name___ == "__main__":
+if __name__ == "__main__":
     asyncio.run(main())
