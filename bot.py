@@ -134,6 +134,7 @@ def fetch_completion_sync(model_name, messages):
             return response.choices[0].message.content
     except Exception as e:
         logging.error(f"Ошибка модели {model_name}: {e}")
+        return f"ERR_API [{model_name}]: {e}"
     return None
 
 @dp.message(CommandStart())
@@ -188,12 +189,12 @@ async def process_user_message_async(message: types.Message):
         chat_history[chat_id] = []
 
     # ==========================================
-    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО (МОЛНИЕНОСНЫЙ ПАРАЛЛЕЛЬНЫЙ ШТУРМ VISION)
+    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО (МГНОВЕННЫЙ ШТУРМ И ВЫВОД ОШИБОК)
     # ==========================================
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         reply_text = None
-        error_log = ""
+        error_logs = []
         
         try:
             photo = message.photo[-1]
@@ -220,25 +221,22 @@ async def process_user_message_async(message: types.Message):
                 }
             ]
 
-            while not reply_text:
-                tasks = [asyncio.to_thread(fetch_completion_sync, model_name, vision_messages) for model_name in VISION_MODELS]
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                
-                for res in results:
-                    if isinstance(res, str) and res:
+            tasks = [asyncio.to_thread(fetch_completion_sync, model_name, vision_messages) for model_name in VISION_MODELS]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            for res in results:
+                if isinstance(res, str):
+                    if res.startswith("ERR_API"):
+                        error_logs.append(res)
+                    elif res.strip():
                         reply_text = res
                         break
-                
-                if reply_text:
-                    break
-                
-                await asyncio.sleep(0)
 
         except Exception as e:
-            error_log = str(e)
+            error_logs.append(f"Global Photo Error: {e}")
             logging.error(f"Критическая ошибка загрузки фото: {e}")
 
-        final_reply = reply_text if reply_text else f"❌ ВСЕ VISION МОДЕЛИ УПАЛИ: {error_log}"
+        final_reply = reply_text if reply_text else ("❌ СБОЙ ВСЕХ VISION МОДЕЛИ:\n" + "\n".join(error_logs))
         
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
         chat_history[chat_id].append({"role": "assistant", "content": final_reply})
@@ -384,7 +382,7 @@ async def process_user_message_async(message: types.Message):
                     {"role": "user", "content": clean_prompt}
                 ]
             )
-            if translation_res:
+            if translation_res and not translation_res.startswith("ERR_API"):
                 english_prompt = translation_res.strip()
         except Exception as e:
             logging.error(f"Ошибка перевода промпта: {e}")
@@ -435,8 +433,9 @@ async def process_user_message_async(message: types.Message):
     
     # 1. ШТАТНЫЙ РЕЖИМ (БЕЗ ЛИМИТА): Мгновенный ответ за миллисекунды
     for model_name in TEXT_MODELS:
-        reply_text = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload)
-        if reply_text:
+        res = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload)
+        if res and not res.startswith("ERR_API"):
+            reply_text = res
             break
 
     # 2. РЕЖИМ ЛИМИТА: БЕСКОНЕЧНЫЙ ПАРАЛЛЕЛЬНЫЙ ШТУРМ ПО ВСЕМ МОДЕЛЯМ ДО ПОБЕДЫ
@@ -454,7 +453,7 @@ async def process_user_message_async(message: types.Message):
             results = await asyncio.gather(*tasks)
             
             for res in results:
-                if res:
+                if isinstance(res, str) and res and not res.startswith("ERR_API"):
                     reply_text = res
                     break
             
