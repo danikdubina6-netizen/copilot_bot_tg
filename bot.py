@@ -390,7 +390,7 @@ async def handle_ai_response(message: types.Message):
 
     reply_text = None
     
-    # ПЕРВАЯ ПОПЫТКА: Обычная генерация с историей
+    # 1. Основной вызов через цикл моделей
     for model_name in TEXT_MODELS:
         try:
             response = groq_client.chat.completions.create(model=model_name, messages=messages_payload, max_tokens=1000)
@@ -398,40 +398,36 @@ async def handle_ai_response(message: types.Message):
                 reply_text = response.choices[0].message.content
                 break
         except Exception as e:
-            logging.warning(f"Ошибка запроса к {model_name}: {e}")
+            logging.warning(f"Сбой модели {model_name}: {e}")
             continue
 
-    # ВТОРАЯ ПОПЫТКА: Если словили ошибку/лимит — АВТОМАТИЧЕСКИ МГНОВЕННО СТИРАЕМ ИСТОРИЮ
+    # 2. Если словили ошибку/лимит — АВТОМАТИЧЕСКИ СТИРАЕМ ИСТОРИЮ И ДЕЛАЕМ ЧИСТЫЙ ЗАПРОС
     if not reply_text:
-        logging.info(f"🔄 АВТО-ОЧИСТКА ИСТОРИИ ЧАТА {chat_id} из-за сбоя/лимита API!")
-        chat_history[chat_id] = [] # Стираем старую историю без лишних слов
+        logging.info(f"🔄 Сброс контекста в чате {chat_id} из-за ошибки API!")
+        chat_history[chat_id] = [] # Полностью стираем накопившийся контекст
         
         fresh_payload = [
-            {"role": "system", "content": chat_custom_instructions[chat_id] + mirror_adaptation},
+            {"role": "system", "content": chat_custom_instructions[chat_id] + "\n\n[ЗАДАЧА]: Ответь прямо и максимально естественно на фразу пользователя без шаблонных отговорок!"},
             {"role": "user", "content": text_content}
         ]
         
         for model_name in TEXT_MODELS:
             try:
-                response = groq_client.chat.completions.create(model=model_name, messages=fresh_payload, max_tokens=800)
+                response = groq_client.chat.completions.create(model=model_name, messages=fresh_payload, max_tokens=500)
                 if response.choices and response.choices[0].message.content:
                     reply_text = response.choices[0].message.content
                     break
             except Exception as e:
-                logging.error(f"Повторный запрос после очистки на {model_name} ошибся: {e}")
+                logging.error(f"Аварийная генерация на {model_name} ошиблась: {e}")
                 continue
 
-    # ТРЕТЬЯ ПОПЫТКА (ГАРАНТИРОВАННЫЙ ОТВЕТ): Если API лежит наглухо — отвечаем вариативно, чтобы бот НИКОГДА НЕ МОЛЧАЛ
+    # 3. Живой динамический ответ, если API перегружен (НИКАКИХ ПОВТОРЯЮЩИХСЯ ЗАГОТОВОК)
     if not reply_text:
-        quick_answers = [
-            "Давай, я на связи! Чё интересного?",
-            "Йо! Го дальше общаться, я тут!",
-            "Тут я! Давай заново, в чем вопрос?",
-            "Разгоняем вайб! Что думаешь?"
-        ]
-        reply_text = random.choice(quick_answers)
+        chat_history[chat_id] = []
+        user_words = text_content.split()
+        keyword = user_words[-1] if user_words else "эту тему"
+        reply_text = f"Окей, замяли! Разворачивай про {keyword}, я внимательно слушую."
 
-    # Записываем ответ бота и отправляем
     chat_history[chat_id].append({"role": "assistant", "content": reply_text})
     processed_text = clean_text_for_telegram(reply_text)
     try:
@@ -445,4 +441,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+            
