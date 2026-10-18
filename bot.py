@@ -148,7 +148,7 @@ async def handle_ai_response(message: types.Message):
     text_content = message.text or message.caption or ""
     now = time.time()
 
-    # Автоочистка если прошло более 6 часов
+    # Автоочистка если прошло больше 6 часов
     if chat_id in chat_last_interaction:
         if now - chat_last_interaction[chat_id] > (AUTO_CLEAR_HOURS * 3600):
             chat_history[chat_id] = []
@@ -389,6 +389,8 @@ async def handle_ai_response(message: types.Message):
     messages_payload = [{"role": "system", "content": chat_custom_instructions[chat_id] + mirror_adaptation}] + chat_history[chat_id]
 
     reply_text = None
+    
+    # ПЕРВАЯ ПОПЫТКА: Обычная генерация с историей
     for model_name in TEXT_MODELS:
         try:
             response = groq_client.chat.completions.create(model=model_name, messages=messages_payload, max_tokens=1000)
@@ -399,10 +401,10 @@ async def handle_ai_response(message: types.Message):
             logging.warning(f"Ошибка запроса к {model_name}: {e}")
             continue
 
-    # ЕСЛИ ПРОИЗОШЛА ОШИБКА: Автоматический бесшовный сброс истории и повторная генерация
+    # ВТОРАЯ ПОПЫТКА: Если словили ошибку/лимит — АВТОМАТИЧЕСКИ МГНОВЕННО СТИРАЕМ ИСТОРИЮ
     if not reply_text:
-        logging.info(f"🔄 Автоматический сброс истории в чате {chat_id} для мгновенного восстановления генерации.")
-        chat_history[chat_id] = [] # Очищаем старую историю
+        logging.info(f"🔄 АВТО-ОЧИСТКА ИСТОРИИ ЧАТА {chat_id} из-за сбоя/лимита API!")
+        chat_history[chat_id] = [] # Стираем старую историю без лишних слов
         
         fresh_payload = [
             {"role": "system", "content": chat_custom_instructions[chat_id] + mirror_adaptation},
@@ -416,16 +418,26 @@ async def handle_ai_response(message: types.Message):
                     reply_text = response.choices[0].message.content
                     break
             except Exception as e:
-                logging.error(f"Повторная попытка к {model_name} ошибка: {e}")
+                logging.error(f"Повторный запрос после очистки на {model_name} ошибся: {e}")
                 continue
 
-    if reply_text:
-        chat_history[chat_id].append({"role": "assistant", "content": reply_text})
-        processed_text = clean_text_for_telegram(reply_text)
-        try:
-            await message.reply(processed_text, parse_mode="HTML")
-        except Exception:
-            await message.reply(html.escape(processed_text), parse_mode="HTML")
+    # ТРЕТЬЯ ПОПЫТКА (ГАРАНТИРОВАННЫЙ ОТВЕТ): Если API лежит наглухо — отвечаем вариативно, чтобы бот НИКОГДА НЕ МОЛЧАЛ
+    if not reply_text:
+        quick_answers = [
+            "Давай, я на связи! Чё интересного?",
+            "Йо! Го дальше общаться, я тут!",
+            "Тут я! Давай заново, в чем вопрос?",
+            "Разгоняем вайб! Что думаешь?"
+        ]
+        reply_text = random.choice(quick_answers)
+
+    # Записываем ответ бота и отправляем
+    chat_history[chat_id].append({"role": "assistant", "content": reply_text})
+    processed_text = clean_text_for_telegram(reply_text)
+    try:
+        await message.reply(processed_text, parse_mode="HTML")
+    except Exception:
+        await message.reply(html.escape(processed_text), parse_mode="HTML")
 
 async def main():
     print(">>> Copilot AI запущен! <<<")
@@ -433,3 +445,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
