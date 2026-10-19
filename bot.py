@@ -253,23 +253,22 @@ async def process_user_message_async(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
-    # Обработка фото (Vision)
+    # Обработка фото (Vision) с использованием актуальной мультимодальной модели
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         reply_text = None
         
         try:
-            photo = message.photo[-2] if len(message.photo) > 1 else message.photo[-1]
+            photo = message.photo[-1]
             photo_file = await bot.get_file(photo.file_id)
             photo_bytes_io = await bot.download_file(photo_file.file_path)
             
             raw_data = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
             base64_image = base64.b64encode(raw_data).decode("utf-8")
 
-            prompt_text = text_content if text_content else "Опиши это изображение."
+            prompt_text = text_content if text_content else "Подробно опиши, что изображено на этом фото."
 
             vision_messages = [
-                {"role": "system", "content": chat_custom_instructions[chat_id]},
                 {
                     "role": "user",
                     "content": [
@@ -284,16 +283,19 @@ async def process_user_message_async(message: types.Message):
                 }
             ]
 
-            for model_name in VISION_MODELS:
-                res = await asyncio.to_thread(fetch_completion_sync, model_name, vision_messages, 300)
-                if res and not res.startswith("ERR_API"):
-                    reply_text = res
-                    break
+            response = await asyncio.to_thread(
+                groq_client.chat.completions.create,
+                model="qwen/qwen3.8-27b",
+                messages=vision_messages,
+                max_tokens=450
+            )
+            if response.choices and response.choices[0].message.content:
+                reply_text = response.choices[0].message.content
 
         except Exception as e:
-            logging.error(f"Критическая ошибка загрузки фото: {e}")
+            logging.error(f"Критическая ошибка обработки фото: {e}")
 
-        final_reply = reply_text or "Рассмотрел фото!"
+        final_reply = reply_text or "Не удалось распознать фото."
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
         chat_history[chat_id].append({"role": "assistant", "content": final_reply})
         await message.reply(clean_text_for_telegram(final_reply), parse_mode="HTML")
