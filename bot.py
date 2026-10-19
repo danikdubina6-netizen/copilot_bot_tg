@@ -49,7 +49,7 @@ BASE_INSTRUCTION = (
     "переключиться на запрошенный стиль и соблюдать его на 100%! "
     "СТИЛЬ ПО УМОЛЧАНИЮ: Отвечай с ЕДКИМ САРКАЗМОМ, ЖИВЫМ ЮМОРОМ И ИРОНИЕЙ! Будь веселым, рофли, используй сленг, подкалывай собеседника, но не будь злым. "
     "СТРОГОЕ ПРАВИЛО БЕЗ ДУШНОТЫ: Никаких занудных лекций, извинений и формальщины! Забудь слова 'я лишь ИИ', 'ограничен базой', 'служебный блок' или 'у меня нет доступа'. "
-    "ПОДАЧИ ИНФОРМАЦИИ: Описывай любые новости и темы ПОДРОБНО, ИНТЕРЕСНО И СВОИМИ СЛОВАМИ. Без сухих кодовых вырезок и унылых списков! "
+    "ПОДАЧИ ИНФОРМАЦИИ: Описывай любые новости и темы ИНТЕРЕСНО И СВОИМИ СЛОВАМИ. Без сухих кодовых вырезок и унылых длинных списков! "
     "ССЫЛКИ: Ссылки на источники вставляй ТОЛЬКО если пользователь прямо спросит 'дай ссылку' или 'где источник'. В остальных случаях — только твой сочный текст. "
     "ИЗОБРАЖЕНИЯ В ТЕКСТЕ: Если к новости есть картинка, можешь прятать её в HTML-тег <a href='URL_КАРТИНКИ'>&#8203;</a> для превью. "
     "ПРАВИЛО КОНЦОВКИ: Завершай мысль полностью, без обрывов на полуслове! "
@@ -185,7 +185,7 @@ def parse_requested_emoji(text: str) -> str | None:
     if "гнев" in lower or "злой" in lower or "💢" in lower: return "💢"
     return None
 
-def fetch_completion_sync(model_name, messages, max_toks=1000):
+def fetch_completion_sync(model_name, messages, max_toks=800):
     try:
         response = groq_client.chat.completions.create(model=model_name, messages=messages, max_tokens=max_toks)
         if response.choices and response.choices[0].message.content:
@@ -201,7 +201,6 @@ async def start_cmd(message: types.Message):
     chat_history[chat_id] = []
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     chat_last_interaction[chat_id] = time.time()
-    # Удаляем клавиатуру снизу
     await message.answer(
         "Здарова! Я <b>Copilot AI</b>. Готов травить сарказм, генерировать картинки и отвечать на любые вопросы!", 
         reply_markup=types.ReplyKeyboardRemove(),
@@ -214,7 +213,7 @@ async def reset_cmd(message: types.Message):
     chat_history[chat_id] = []
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     chat_last_interaction[chat_id] = time.time()
-    await message.reply("🧠 Память стёрта! Начинаем стебать с чистого листа.")
+    await message.reply("🧠 Память стёрта! Начинаем стебать с чистого листа.", reply_markup=types.ReplyKeyboardRemove())
 
 @dp.message(Command("mode"))
 async def mode_cmd(message: types.Message):
@@ -465,7 +464,7 @@ async def process_user_message_async(message: types.Message):
 
     reply_text = None
     for model_name in TEXT_MODELS:
-        res = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload, 1000)
+        res = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload, 800)
         if res and not res.startswith("ERR_API"):
             reply_text = res
             break
@@ -483,7 +482,7 @@ async def process_user_message_async(message: types.Message):
         await message.reply(html.escape(processed_text), parse_mode="HTML")
 
 async def main():
-    print(">>> Copilot AI запущен! Кнопки крипты полностью убраны. <<<")
+    print(">>> Copilot AI запущен! Лимит max_toks установлен на 800. <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
