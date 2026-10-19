@@ -18,8 +18,9 @@ logging.basicConfig(level=logging.INFO)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-# Платежный токен Portmone (тест-режим)
-PAYMENT_TOKEN = os.getenv("PAYMENT_TOKEN", "ТВОЙ_ТЕСТОВЫЙ_ТОКЕН_ПОРТМОНЕ")
+
+# Токен оплаты (с фоллбеком на случай, если переменная не подтянулась)
+PAYMENT_TOKEN = os.getenv("PAYMENT_TOKEN") or "1661751239:TEST:q9W9-2313-Q356-QDJ3"
 
 # БПП (Блок Предотвращения Потерь): Максимальный потолок безопасности (до 100 грн)
 MAX_ALLOWED_PAYMENT = 100 
@@ -33,7 +34,6 @@ if GROQ_API_KEY:
 
 BOT_USERNAME = "Copilot_AI2026_bot"
 
-# Штурмовой пул текстовых моделей
 TEXT_MODELS = [
     "llama-3.3-70b-versatile",
     "qwen/qwen3.8-27b",
@@ -41,7 +41,6 @@ TEXT_MODELS = [
     "openai/gpt-oss-20b"
 ]
 
-# Пул моделей для картинок и анализа фото
 VISION_MODELS = [
     "qwen/qwen3.8-27b"
 ]
@@ -70,7 +69,6 @@ chat_last_interaction = {}
 AUTO_CLEAR_HOURS = 6
 
 def search_web_real_sync(query: str, max_results=6) -> str:
-    """Ультра-умный веб-поиск: вытягивает заголовок, текст и картинки"""
     try:
         clean_query = re.sub(r'[^\w\sА-Яа-яЁё]', ' ', query).strip()
         clean_query = " ".join(clean_query.split()[:8])
@@ -156,7 +154,7 @@ async def start_cmd(message: types.Message):
     chat_last_interaction[chat_id] = time.time()
     await message.answer(
         "Здарова! Я <b>Copilot AI</b>. Готов травить сарказм, оформлять заказы по фото и тексту с курьерской доставкой!\n\n"
-        "💳 <b>Как купить:</b> Скинь фото товара или напиши, например: <i>'Оплати мне футболку за 50 гривен'</i>", 
+        "💳 <b>Как купить:</b> Напиши <i>'Оплати футболку за 50 гривен'</i> или используй <code>/buy 50</code>", 
         parse_mode="HTML"
     )
 
@@ -186,21 +184,16 @@ async def mode_cmd(message: types.Message):
         await message.reply("⚠️ Укажи режим, например: <code>/mode Будь максимально серьезным ученым</code>", parse_mode="HTML")
 
 # ==========================================
-# УМНАЯ ПЛАТЕЖНАЯ СИСТЕМА И КУРЬЕРСКАЯ ДОСТАВКА
+# ОБРАБОТКА ПЛАТЕЖЕЙ С ТОЧНОЙ ДИАГНОСТИКОЙ
 # ==========================================
 async def process_payment_request(message: types.Message, custom_title: str = None):
-    """Универсальная функция формирования инвойса с доставкой курьером"""
     text = message.text or message.caption or ""
     
     numbers = re.findall(r'\d+(?:[.,]\d+)?', text)
-    amount = float(numbers[0].replace(',', '.')) if numbers else None
+    amount = float(numbers[0].replace(',', '.')) if numbers else 50.0
     
-    if not amount or amount <= 0:
-        await message.reply(
-            "⚠️ Укажи сумму для оплаты товара, например:\n"
-            "<code>Оплати мне футболку за 50 гривен</code>", 
-            parse_mode="HTML"
-        )
+    if amount <= 0:
+        await message.reply("⚠️ Сумма должна быть больше 0 грн.")
         return
 
     if amount > MAX_ALLOWED_PAYMENT:
@@ -211,28 +204,31 @@ async def process_payment_request(message: types.Message, custom_title: str = No
         )
         return
 
-    # Название товара
     product_title = custom_title if custom_title else re.sub(r'/buy|\d+|грн|гривен|оплати|купи|заплати', '', text).strip()
     if len(product_title) < 2:
-        product_title = "Товар по фото/запросу"
+        product_title = "Товар с доставкой"
 
     price_in_cents = int(amount * 100)
 
     try:
-        await bot.send_invoice(
-            chat_id=message.chat.id,
+        # Используем встроенный метод message.answer_invoice
+        await message.answer_invoice(
             title="Заказ с курьерской доставкой",
-            description=f"Товар: {product_title[:50]} | Сумма: {amount} UAH (Доставка курьером)",
-            payload=f"user_{message.from_user.id}_delivery_payload",
+            description=f"Товар: {product_title[:40]} | Доставка курьером",
+            payload=f"payload_{message.from_user.id}_{int(time.time())}",
             provider_token=PAYMENT_TOKEN,
             currency="UAH",
             prices=[types.LabeledPrice(label=product_title[:32], amount=price_in_cents)],
-            start_parameter="courier-delivery",
-            protect_content=True
+            start_parameter="courier-pay"
         )
     except Exception as e:
-        logging.error(f"Ошибка выставления счета: {e}")
-        await message.reply("⚠️ Не удалось выставить счет. Проверь PAYMENT_TOKEN.")
+        logging.error(f"Ошибка выкатки счета: {e}")
+        # Выводим точную ошибку прямо в чат!
+        await message.reply(
+            f"⚠️ <b>Ошибка выставления счета:</b>\n<code>{html.escape(str(e))}</code>\n\n"
+            f"🔹 <i>Токен:</i> <code>{PAYMENT_TOKEN[:10]}...</code>", 
+            parse_mode="HTML"
+        )
 
 @dp.message(Command("buy"))
 async def buy_cmd(message: types.Message):
@@ -283,7 +279,6 @@ async def process_user_message_async(message: types.Message):
     text_content = message.text or message.caption or ""
     now = time.time()
 
-    # Проверка текстового запроса на оплату (например, "оплати футболку за 50 грн")
     lower_check = text_content.lower()
     if any(word in lower_check for word in ["оплати", "купи", "заплати"]) and any(char.isdigit() for char in text_content):
         await process_payment_request(message)
@@ -301,9 +296,6 @@ async def process_user_message_async(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
-    # ==========================================
-    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО (С АНАЛИЗОМ И ВОЗМОЖНОСТЬЮ ОПЛАТЫ)
-    # ==========================================
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         reply_text = None
@@ -345,7 +337,6 @@ async def process_user_message_async(message: types.Message):
 
         final_reply = reply_text or "Рассмотрел товар на фото!"
         
-        # Если в подписи к фото просят оплатить (например, "оплати за 50 грн"), запускаем оплату по фото!
         if any(w in lower_check for w in ["оплати", "купи", "заплати"]) and any(c.isdigit() for c in text_content):
             await message.reply(clean_text_for_telegram(final_reply), parse_mode="HTML")
             await process_payment_request(message, custom_title=text_content)
@@ -357,9 +348,135 @@ async def process_user_message_async(message: types.Message):
         await message.reply(processed_text, parse_mode="HTML")
         return
 
-    # ==========================================
-    # ОБРАБОТКА ГОЛОСОВЫХ И ДИНАМИЧЕСКОЙ СМЕНЫ СТИЛЯ
-    # ==========================================
+    temp_audio_path = None
+    if message.voice:
+        try:
+            await bot.send_chat_action(chat_id=chat_id, action="typing")
+            voice_file = await bot.get_file(message.voice.file_id)
+            voice_bytes = await bot.download_file(voice_file.file_path)
+            
+            temp_audio_path = f"temp_voice_{message.message_id}.ogg"
+            with open(temp_audio_path, "wb") as f:
+                f.write(voice_bytes.read())
+
+            def transcribe_voice():
+                with open(temp_audio_path, "rb") as audio_file:
+                    return groq_client.audio.transcriptions.create(
+                        model="whisper-large-v3",
+                        file=audio_file,
+                        response_format="text",
+                        language="ru"
+                    )
+
+            transcript_response = await asyncio.to_thread(transcribe_voice)
+            
+            if temp_audio_path and os.path.exists(temp_audio_path):
+                os.remove(temp_audio_path)
+
+            text_content = transcript_response if isinstance(transcript_response, str) else transcript_response.text
+            await message.reply(f"🎙️ <i>Распознано:</i> <b>{html.escape(text_content)}</b>", parse_mode="HTML")
+        except Exception as e:
+            logging.error(f"Ошибка распознавания голосового: {e}")
+            if temp_audio_path and os.path.exists(temp_audio_path):
+                os.remove(temp_audio_path)
+            await message.reply("⚠️ Не разобрал твоё бубнение, давай почетче!")
+            return
+
+    lower_text = text_content.lower()
+    
+    change_style_triggers = ["будь ", "стань ", "веди себя как ", "отвечай как ", "разговаривай как ", "пиши как ", "переключись на "]
+    for trig in change_style_triggers:
+        if lower_text.startswith(trig) or f" {trig}" in lower_text:
+            new_style = text_content
+            chat_custom_instructions[chat_id] = (
+                f"Ты — Copilot AI (ОКТЯБРЬ 2026 ГОДА). ПРИКАЗ ПО ПОВЕДЕНИЮ: {new_style}. "
+                "Соблюдай эту роль СТРОГО И БЕЗОГОВОРНО в каждом ответе! "
+                "Никакого нытья про 'я лишь ИИ', 'ограничен базой' или 'служебный блок'. Отвечай ПОДРОБНО, СВОИМИ СЛОВАМИ И НА РУССКОМ ЯЗЫКЕ."
+            )
+            chat_history[chat_id] = []
+
+    is_voice_requested = lower_text.startswith("озв") or lower_text.startswith("скаж") or "озвучь" in lower_text or "скажи голосом" in lower_text
+
+    should_answer = True
+    if chat_type != "private" and not getattr(message, "business_connection_id", None) and not is_voice_requested:
+        if not message.photo:
+            should_answer = False
+            if message.reply_to_message and message.reply_to_message.from_user:
+                if message.reply_to_message.from_user.id == (await bot.get_me()).id:
+                    should_answer = True
+            if f"@{BOT_USERNAME}".lower() in lower_text:
+                should_answer = True
+                text_content = text_content.replace(f"@{BOT_USERNAME}", "").strip()
+                
+            if not should_answer:
+                group_message_counters[chat_id] = group_message_counters.get(chat_id, 0) + 1
+                if group_message_counters[chat_id] >= 15:
+                    group_message_counters[chat_id] = 0
+                    should_answer = True
+
+    if not should_answer:
+        return
+
+    if message.reply_to_message and message.reply_to_message.from_user.id != (await bot.get_me()).id:
+        try:
+            rand_emoji = random.choice(["🔥", "👍", "❤️", "🗿", "😂"])
+            await bot.set_message_reaction(
+                chat_id=chat_id,
+                message_id=message.reply_to_message.message_id,
+                reaction=[types.ReactionTypeEmoji(emoji=rand_emoji)]
+            )
+        except Exception as e:
+            logging.error(f"Ошибка установки реакции: {e}")
+
+    requested_emoji = parse_requested_emoji(text_content)
+    if requested_emoji and not is_voice_requested:
+        try:
+            target_msg_id = message.reply_to_message.message_id if message.reply_to_message else message.message_id
+            await bot.set_message_reaction(
+                chat_id=chat_id,
+                message_id=target_msg_id,
+                reaction=[types.ReactionTypeEmoji(emoji=requested_emoji)]
+            )
+        except Exception as e:
+            logging.error(f"Ошибка реакций: {e}")
+
+    if is_voice_requested:
+        words = text_content.split()
+        speech_prompt = " ".join(words[1:]) if len(words) > 1 else text_content
+        speech_prompt = speech_prompt or "Пустой текст."
+
+        await bot.send_chat_action(chat_id=chat_id, action="record_voice")
+        audio_path = f"voice_temp_{random.randint(1000, 9999)}.ogg"
+        try:
+            clean_for_speech = speech_prompt.replace('"', '').replace("'", "").replace('«', '').replace('»', '').replace('*', '')
+            tts = gTTS(text=clean_for_speech, lang='ru', slow=False)
+            tts.save(audio_path)
+            
+            audio_file = types.FSInputFile(audio_path)
+            await message.reply_voice(
+                voice=audio_file,
+                caption=f"🎙️ <b>{html.escape(speech_prompt)}</b>",
+                parse_mode="HTML"
+            )
+            if os.path.exists(audio_path):
+                os.remove(audio_path)
+            return
+        except Exception as e:
+            logging.error(f"Критическая ошибка загрузки фото: {e}")
+
+        final_reply = reply_text or "Рассмотрел товар на фото!"
+        
+        if any(w in lower_check for w in ["оплати", "купи", "заплати"]) and any(c.isdigit() for c in text_content):
+            await message.reply(clean_text_for_telegram(final_reply), parse_mode="HTML")
+            await process_payment_request(message, custom_title=text_content)
+            return
+
+        chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
+        chat_history[chat_id].append({"role": "assistant", "content": final_reply})
+        processed_text = clean_text_for_telegram(final_reply)
+        await message.reply(processed_text, parse_mode="HTML")
+        return
+
     temp_audio_path = None
     if message.voice:
         try:
@@ -480,9 +597,6 @@ async def process_user_message_async(message: types.Message):
             await message.reply(f"⚠️ Ошибка озвучки: {e}")
             return
 
-    # ==========================================
-    # ГЕНЕРАЦИЯ КАРТИНКИ
-    # ==========================================
     if any(trig in lower_text for trig in ["сгенерируй", "нарисуй", "создай картинку", "аватарка", "изображение"]):
         clean_prompt = text_content
         for trig in ["сгенерируй", "нарисуй", "создай картинку", "создай", "изображение", "картинку", "аватарка", "где"]:
@@ -528,9 +642,6 @@ async def process_user_message_async(message: types.Message):
     if not text_content:
         return
 
-    # ==========================================
-    # ВЕБ-ПОИСК
-    # ==========================================
     explicit_search_triggers = ["найди", "погугли", "ищи", "загугли", "новости", "курс", "погода", "цена", "подтвердил", "взрыв", "слухи", "качай"]
     info_questions = ["кто такой", "что такое", "когда был", "где находится", "сколько стоит", "какой состав", "правда ли", "было ли"]
     
@@ -599,7 +710,7 @@ async def process_user_message_async(message: types.Message):
         await message.reply(html.escape(processed_text), parse_mode="HTML")
 
 async def main():
-    print(">>> Copilot AI запущен с курьерской доставкой и оплатой! <<<")
+    print(">>> Copilot AI запущен с точным выводом ошибок оплаты! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
