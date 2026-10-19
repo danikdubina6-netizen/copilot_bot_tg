@@ -201,8 +201,10 @@ async def start_cmd(message: types.Message):
     chat_history[chat_id] = []
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     chat_last_interaction[chat_id] = time.time()
+    # Удаляем клавиатуру снизу
     await message.answer(
         "Здарова! Я <b>Copilot AI</b>. Готов травить сарказм, генерировать картинки и отвечать на любые вопросы!", 
+        reply_markup=types.ReplyKeyboardRemove(),
         parse_mode="HTML"
     )
 
@@ -481,7 +483,7 @@ async def process_user_message_async(message: types.Message):
         await message.reply(html.escape(processed_text), parse_mode="HTML")
 
 async def main():
-    print(">>> Copilot AI запущен в штатном режиме без лишнего крипто-мусора! <<<")
+    print(">>> Copilot AI запущен! Кнопки крипты полностью убраны. <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
