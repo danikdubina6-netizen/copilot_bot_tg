@@ -44,15 +44,12 @@ VISION_MODELS = [
 
 BASE_INSTRUCTION = (
     "Ты — Copilot AI. На дворе ОКТЯБРЬ 2026 ГОДА. "
-    "СТРОЖАЙШЕЕ ПРАВИЛО СМЕНЫ РОЛИ: Если пользователь просит сменить стиль, поведение, роль или режим общения "
-    "(например, '/mode ...', 'будь ...', 'стань ...', 'отвечай как ...'), ты ОБЯЗАН СТРОГО, БЕЗОГОВОРНО И МГНОВЕННО "
-    "переключиться на запрошенный стиль и соблюдать его на 100%! "
-    "СТИЛЬ ПО УМОЛЧАНИЮ: Отвечай с ЕДКИМ САРКАЗМОМ, ЖИВЫМ ЮМОРОМ И ИРОНИЕЙ! Будь веселым, рофли, используй сленг, подкалывай собеседника, но не будь злым. "
-    "СТРОГОЕ ПРАВИЛО БЕЗ ДУШНОТЫ: Никаких занудных лекций, извинений и формальщины! Забудь слова 'я лишь ИИ', 'ограничен базой', 'служебный блок' или 'у меня нет доступа'. "
-    "ПОДАЧИ ИНФОРМАЦИИ: Описывай любые новости и темы ИНТЕРЕСНО И СВОИМИ СЛОВАМИ. Без сухих кодовых вырезок и унылых длинных списков! "
-    "ССЫЛКИ: Ссылки на источники вставляй ТОЛЬКО если пользователь прямо спросит 'дай ссылку' или 'где источник'. В остальных случаях — только твой сочный текст. "
-    "ИЗОБРАЖЕНИЯ В ТЕКСТЕ: Если к новости есть картинка, можешь прятать её в HTML-тег <a href='URL_КАРТИНКИ'>&#8203;</a> для превью. "
-    "ПРАВИЛО КОНЦОВКИ: Завершай мысль полностью, без обрывов на полуслове! "
+    "СТРОЖАЙШЕЕ ПРАВИЛО СМЕНЫ РОЛИ: Если пользователь просит сменить стиль, поведение или роль "
+    "(например, '/mode ...', 'будь ...', 'стань ...'), ты ОБЯЗАН СТРОГО И МГНОВЕННО переключиться на запрошенный стиль! "
+    "СТИЛЬ ПО УМОЛЧАНИЮ: Отвечай с ЕДКИМ САРКАЗМОМ, ЖИВЫМ ЮМОРОМ И ИРОНИЕЙ! Будь веселым, подкалывай собеседника. "
+    "СТРОГОЕ ПРАВИЛО ДЛИНЫ И ФОРМАТА: Твой ответ должен быть СРЕДНИМ ИЛИ КОРОТКИМ! Никаких гигантских лекций, "
+    "длинных списков и затянутых объяснений. Пиши емко, лаконично и четко по сути, чтобы весь текст легко влезал на экран смартфона. "
+    "ПРАВИЛО КОНЦОВКИ: ВСЕГДА завершай мысль полностью и ставь точку! Никаких обрывов предложений на полуслове. "
     "ЯЗЫК: ИСКЛЮЧИТЕЛЬНО РУССКИЙ ЯЗЫК."
 )
 
@@ -161,7 +158,7 @@ def clean_text_for_telegram(text: str) -> str:
         escaped_content = html.escape(stripped_content)
         return f"<pre><code>{escaped_content}</code></pre>"
         
-    text = re.sub(r'```([a-zA-Z]*)\n?(.*?)```', code_block_replacer, text, flags=re.DOTALL)
+    text = re.sub(r'```([a-zA-Z]*)\n?(.*?)```', code_block_replacer, text, flags=logicals := re.DOTALL)
     text = re.sub(r'`([^`]+?)`', lambda m: "<code>" + html.escape(m.group(1)) + "</code>", text)
     text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'(?<!\s)\*(?!\s)(.*?)(?<!\s)\*(?!\w)', r'<i>\1</i>', text)
@@ -185,7 +182,7 @@ def parse_requested_emoji(text: str) -> str | None:
     if "гнев" in lower or "злой" in lower or "💢" in lower: return "💢"
     return None
 
-def fetch_completion_sync(model_name, messages, max_toks=800):
+def fetch_completion_sync(model_name, messages, max_toks=450):
     try:
         response = groq_client.chat.completions.create(model=model_name, messages=messages, max_tokens=max_toks)
         if response.choices and response.choices[0].message.content:
@@ -224,7 +221,7 @@ async def mode_cmd(message: types.Message):
         chat_custom_instructions[chat_id] = (
             f"Ты — Copilot AI (ОКТЯБРЬ 2026 ГОДА). ПРИКАЗ ПО ПОВЕДЕНИЮ: {new_persona}. "
             "Соблюдай эту роль СТРОГО И БЕЗОГОВОРНО в каждом ответе! "
-            "Никакого нытья про 'я лишь ИИ', 'ограничен базой' или 'служебный блок'. Отвечай ПОДРОБНО, СВОИМИ СЛОВАМИ И НА РУССКОМ ЯЗЫКЕ."
+            "Отвечай КРАТКО, ЕМКО И НА РУССКОМ ЯЗЫКЕ."
         )
         chat_history[chat_id] = []
         chat_last_interaction[chat_id] = time.time()
@@ -289,7 +286,7 @@ async def process_user_message_async(message: types.Message):
             ]
 
             for model_name in VISION_MODELS:
-                res = await asyncio.to_thread(fetch_completion_sync, model_name, vision_messages, 500)
+                res = await asyncio.to_thread(fetch_completion_sync, model_name, vision_messages, 300)
                 if res and not res.startswith("ERR_API"):
                     reply_text = res
                     break
@@ -345,8 +342,7 @@ async def process_user_message_async(message: types.Message):
             new_style = text_content
             chat_custom_instructions[chat_id] = (
                 f"Ты — Copilot AI (ОКТЯБРЬ 2026 ГОДА). ПРИКАЗ ПО ПОВЕДЕНИЮ: {new_style}. "
-                "Соблюдай эту роль СТРОГО И БЕЗОГОВОРНО в каждом ответе! "
-                "Никакого нытья про 'я лишь ИИ', 'ограничен базой' или 'служебный блок'. Отвечай ПОДРОБНО, СВОИМИ СЛОВАМИ И НА РУССКОМ ЯЗЫКЕ."
+                "Соблюдай эту роль СТРОГО И БЕЗОГОВОРНО в каждом ответе! Отвечай КРАТКО, ЕМКО И НА РУССКОМ ЯЗЫКЕ."
             )
             chat_history[chat_id] = []
 
@@ -464,7 +460,8 @@ async def process_user_message_async(message: types.Message):
 
     reply_text = None
     for model_name in TEXT_MODELS:
-        res = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload, 800)
+        # Лимит max_toks=450 гарантирует средний, лаконичный ответ без обрывов
+        res = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload, 450)
         if res and not res.startswith("ERR_API"):
             reply_text = res
             break
@@ -482,7 +479,7 @@ async def process_user_message_async(message: types.Message):
         await message.reply(html.escape(processed_text), parse_mode="HTML")
 
 async def main():
-    print(">>> Copilot AI запущен! Лимит max_toks установлен на 800. <<<")
+    print(">>> Copilot AI запущен в штатном режиме! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
