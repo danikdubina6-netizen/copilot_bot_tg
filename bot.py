@@ -253,7 +253,7 @@ async def process_user_message_async(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
-    # Обработка фото (Vision) с использованием актуальной мультимодальной модели
+    # Обработка фото через актуальную мультимодальную qwen/qwen3.8-27b
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         reply_text = None
@@ -266,7 +266,7 @@ async def process_user_message_async(message: types.Message):
             raw_data = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
             base64_image = base64.b64encode(raw_data).decode("utf-8")
 
-            prompt_text = text_content if text_content else "Подробно опиши, что изображено на этом фото."
+            prompt_text = text_content if text_content else "Подробно опиши, что на этой картинке."
 
             vision_messages = [
                 {
