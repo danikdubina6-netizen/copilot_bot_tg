@@ -2,33 +2,38 @@ name: Run Copilot AI Bot
 
 on:
   push:
-  pull_request:
-  schedule:
-    - cron: '*/30 * * * *' # Авто-пинги каждые 30 минут, чтобы бот не засыпал
+    branches: [ "main", "master" ]
   workflow_dispatch:
+  schedule:
+    - cron: '0 */5 * * *'  # Автоматический перезапуск каждые 5 часов, чтобы обходить лимит GitHub
 
 jobs:
-  build:
+  run-bot:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Чеккаут кода из репозитория
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - name: Установка Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install aiogram openai gtts beautifulsoup4
+      - name: Установка системных зависимостей (FFmpeg для голосовых)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
 
-    - name: Run Telegram Bot
-      env:
-        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      run: |
-        python bot.py
+      - name: Установка библиотек Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install aiogram openai gTTS beautifulsoup4
+
+      - name: Запуск бота
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          PAYMENT_TOKEN: ${{ secrets.PAYMENT_TOKEN }}
+        run: python bot.py
         
