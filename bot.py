@@ -9,6 +9,7 @@ import urllib.parse
 import urllib.request
 from bs4 import BeautifulSoup
 from gtts import gTTS
+import aiohttp
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
@@ -23,11 +24,9 @@ logging.basicConfig(level=logging.INFO)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# Токен оплаты (с фоллбеком)
-PAYMENT_TOKEN = os.getenv("PAYMENT_TOKEN") or "1661751239:TEST:q9W9-2313-Q356-QDJ3"
-
-# БПП (Блок Предотвращения Потерь): Максимальный потолок безопасности (до 100 грн)
-MAX_ALLOWED_PAYMENT = 100 
+# Токен криптошлюза Ammer Pay из секретов/переменных окружения
+AMMER_PAY_API_TOKEN = os.getenv("AMMER_PAY_API_TOKEN")
+AMMER_PAYOUT_URL = "https://api.ammer.io/v1/payout"
 
 groq_client = None
 if GROQ_API_KEY:
@@ -63,10 +62,11 @@ BASE_INSTRUCTION = (
     "ЯЗЫК: ИСКЛЮЧИТЕЛЬНО РУССКИЙ ЯЗЫК."
 )
 
-# Состояния FSM для сбора адреса и телефона после оплаты
-class OrderStates(StatesGroup):
-    waiting_for_address = State()
-    waiting_for_phone = State()
+# Состояния FSM для крипто-выплат пользователям через Ammer Pay
+class PayoutStates(StatesGroup):
+    waiting_for_currency = State()
+    waiting_for_amount = State()
+    waiting_for_wallet = State()
 
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -76,8 +76,6 @@ chat_custom_instructions = {}
 group_message_counters = {}
 chat_last_interaction = {}
 AUTO_CLEAR_HOURS = 6
-
-paid_orders = {}
 
 # ==========================================
 # МОДУЛЬ ВЕБ-АВТОМАТИЗАЦИИ (PLAYWRIGHT)
@@ -216,8 +214,12 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     chat_last_interaction[chat_id] = time.time()
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b>. Готов травить сарказм, оформлять заказы по фото и тексту с авто-заказом на сайтах!\n\n"
-        "💳 <b>Как купить:</b> Напиши <i>'Оплати бургер за 50 гривен'</i> или используй <code>/buy 50</code>", 
+        "Здарова! Я <b>Copilot AI</b>. Готов травить сарказм, генерировать картинки и отправлять крипту пользователям!\n\n"
+        "💸 <b>Выплаты:</b> Нажми кнопку ниже или введи команду <code>/payout</code>", 
+        reply_markup=types.ReplyKeyboardMarkup(
+            keyboard=[[types.KeyboardButton(text="💸 Сделать выплату крипты")]],
+            resize_keyboard=True
+        ),
         parse_mode="HTML"
     )
 
@@ -247,123 +249,107 @@ async def mode_cmd(message: types.Message):
         await message.reply("⚠️ Укажи режим, например: <code>/mode Будь максимально серьезным ученым</code>", parse_mode="HTML")
 
 # ==========================================
-# ОБРАБОТКА ПЛАТЕЖЕЙ И ЗАКАЗОВ
+# МОДУЛЬ КРИПТО-ВЫПЛАТ (AMMER PAY)
 # ==========================================
-async def process_payment_request(message: types.Message, custom_title: str = None):
-    text = message.text or message.caption or ""
-    
-    numbers = re.findall(r'\d+(?:[.,]\d+)?', text)
-    amount = float(numbers[0].replace(',', '.')) if numbers else 50.0
-    
-    if amount <= 0:
-        await message.reply("⚠️ Сумма должна быть больше 0 грн.")
-        return
-
-    if amount > MAX_ALLOWED_PAYMENT:
-        await message.reply(
-            f"🛑 <b>Превышен лимит безопасности!</b>\n"
-            f"Я провожу безопасные платежи на сумму до <b>{MAX_ALLOWED_PAYMENT} UAH</b>.",
-            parse_mode="HTML"
+@dp.message(Command("payout"))
+@dp.message(F.text == "💸 Сделать выплату крипты")
+async def start_payout(message: types.Message, state: FSMContext):
+    await message.answer(
+        "Выберите криптовалюту для выплаты пользователю (например: USDT, TON, BTC, ETH):",
+        reply_markup=types.ReplyKeyboardMarkup(
+            keyboard=[
+                [types.KeyboardButton(text="USDT"), types.KeyboardButton(text="TON")],
+                [types.KeyboardButton(text="BTC"), types.KeyboardButton(text="ETH")]
+            ],
+            resize_keyboard=True
         )
-        return
+    )
+    await state.set_state(PayoutStates.waiting_for_currency)
 
-    product_title = custom_title if custom_title else re.sub(r'/buy|\d+|грн|гривен|оплати|купи|заплати', '', text).strip()
-    if len(product_title) < 2:
-        product_title = "Бургер с доставкой"
+@dp.message(PayoutStates.waiting_for_currency)
+async def process_currency(message: types.Message, state: FSMContext):
+    currency = message.text.upper()
+    await state.update_data(currency=currency)
+    
+    await message.answer(
+        f"Вы выбрали: <b>{currency}</b>.\nВведите сумму для выплаты:",
+        parse_mode="HTML",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+    await state.set_state(PayoutStates.waiting_for_amount)
 
-    price_in_cents = int(amount * 100)
-
+@dp.message(PayoutStates.waiting_for_amount)
+async def process_amount(message: types.Message, state: FSMContext):
     try:
-        await message.answer_invoice(
-            title="Заказ с курьерской доставкой",
-            description=f"Товар: {product_title[:40]} | Авто-заказ через робота",
-            payload=f"payload_{message.from_user.id}_{int(time.time())}",
-            provider_token=PAYMENT_TOKEN,
-            currency="UAH",
-            prices=[types.LabeledPrice(label=product_title[:32], amount=price_in_cents)],
-            start_parameter="courier-pay"
-        )
-    except Exception as e:
-        logging.error(f"Ошибка выкатки счета: {e}")
-        await message.reply(
-            f"⚠️ <b>Ошибка выставления счета:</b>\n<code>{html.escape(str(e))}</code>\n\n"
-            f"🔹 <i>Токен:</i> <code>{PAYMENT_TOKEN[:10]}...</code>", 
-            parse_mode="HTML"
-        )
-
-@dp.message(Command("buy"))
-async def buy_cmd(message: types.Message):
-    await process_payment_request(message)
-
-@dp.pre_checkout_query()
-async def pre_checkout_handler(pre_checkout_query: types.PreCheckoutQuery):
-    if pre_checkout_query.currency != "UAH":
-        await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=False, error_message="Доступно только в UAH!")
+        amount = float(message.text.replace(",", "."))
+        if amount <= 0:
+            raise ValueError()
+    except ValueError:
+        await message.answer("❌ Неверная сумма. Введите корректное число (например, 10 или 5.5):")
         return
 
-    total_amount = pre_checkout_query.total_amount / 100
-    if total_amount > MAX_ALLOWED_PAYMENT:
-        await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=False, error_message=f"Лимит {MAX_ALLOWED_PAYMENT} грн!")
-        return
-    
-    await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+    await state.update_data(amount=amount)
+    await message.answer("🌐 Введите адрес криптокошелька получателя:")
+    await state.set_state(PayoutStates.waiting_for_wallet)
 
-@dp.message(F.successful_payment)
-async def successful_payment_handler(message: types.Message, state: FSMContext):
-    payment_info = message.successful_payment
-    amount_paid = payment_info.total_amount / 100
-    user_id = message.from_user.id
-    
-    paid_orders[user_id] = {
-        "amount": amount_paid,
-        "item": "Бургер / Товар"
+async def send_ammer_payout(wallet: str, amount: float, currency: str) -> tuple[bool, str]:
+    headers = {
+        "Authorization": f"Bearer {AMMER_PAY_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "address": wallet,
+        "amount": amount,
+        "currency": currency
     }
 
-    await message.reply(
-        f"🎉 <b>Оплата прошла успешно!</b> ({amount_paid} UAH)\n\n"
-        f"📍 <b>Введите адрес доставки</b> (Город, улица, дом, квартира), чтобы браузерный робот оформил заказ на сайте:",
-        parse_mode="HTML"
-    )
-    await state.set_state(OrderStates.waiting_for_address)
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.post(AMMER_PAYOUT_URL, json=payload, headers=headers, timeout=15) as response:
+                data = await response.json()
+                if response.status == 200 and data.get("success"):
+                    tx_id = data.get("tx_id", "Успешно отправлено")
+                    return True, tx_id
+                else:
+                    error_msg = data.get("error", f"Ошибка сервера: {response.status}")
+                    return False, error_msg
+        except Exception as e:
+            return False, str(e)
 
-@dp.message(OrderStates.waiting_for_address)
-async def process_address(message: types.Message, state: FSMContext):
-    await state.update_data(address=message.text)
-    await message.reply("📞 Теперь введите ваш **номер телефона** для связи с курьером:")
-    await state.set_state(OrderStates.waiting_for_phone)
+@dp.message(PayoutStates.waiting_for_wallet)
+async def process_wallet(message: types.Message, state: FSMContext):
+    wallet_address = message.text.strip()
+    data = await state.get_data()
+    
+    currency = data.get("currency")
+    amount = data.get("amount")
 
-@dp.message(OrderStates.waiting_for_phone)
-async def process_phone(message: types.Message, state: FSMContext):
-    user_data = await state.get_data()
-    address = user_data['address']
-    phone = message.text
-    user_id = message.from_user.id
-    user_name = message.from_user.full_name or "Покупатель"
+    await message.answer("⏳ Обрабатываю выплату через Ammer Pay...")
 
-    order_info = paid_orders.get(user_id, {"item": "Бургер"})
-
-    await message.reply("🤖 <b>Запускаю браузерного робота...</b>\nОн открывает сайт, ищет товар и заполняет форму заказа!", parse_mode="HTML")
-
-    success = await automate_web_order(
-        item_name=order_info["item"],
-        address=address,
-        phone=phone,
-        user_name=user_name
-    )
+    success, result = await send_ammer_payout(wallet_address, amount, currency)
 
     if success:
-        await message.reply(
-            f"✅ <b>Заказ успешно оформлен на сайте!</b>\n\n"
-            f"📦 <b>Товар:</b> {order_info['item']}\n"
-            f"📍 <b>Адрес:</b> {address}\n"
-            f"📱 <b>Телефон:</b> {phone}\n\n"
-            f"Курьер выехал по вашему адресу! 🚴‍♂️💨",
+        await message.answer(
+            f"✅ <b>Выплата успешно отправлена пользователю!</b>\n\n"
+            f"💰 Сумма: {amount} {currency}\n"
+            f"📬 Кошелек: <code>{wallet_address}</code>\n"
+            f"🔍 ID транзакции: <code>{result}</code>",
             parse_mode="HTML"
         )
     else:
-        await message.reply("⚠️ Робот попытался заказать товар, но сайт потребовал ручного подтверждения. Данные переданы.")
+        await message.answer(
+            f"❌ <b>Не удалось выполнить выплату.</b>\nПричина: {result}",
+            parse_mode="HTML"
+        )
 
     await state.clear()
+    await message.answer(
+        "Главное меню:",
+        reply_markup=types.ReplyKeyboardMarkup(
+            keyboard=[[types.KeyboardButton(text="💸 Сделать выплату крипты")]],
+            resize_keyboard=True
+        )
+    )
 
 # ==========================================
 # ОСНОВНОЙ ОБРАБОТЧИК СООБЩЕНИЙ И ИИ
@@ -377,11 +363,6 @@ async def process_user_message_async(message: types.Message):
     chat_type = message.chat.type
     text_content = message.text or message.caption or ""
     now = time.time()
-
-    lower_check = text_content.lower()
-    if any(word in lower_check for word in ["оплати", "купи", "заплати"]) and any(char.isdigit() for char in text_content):
-        await process_payment_request(message)
-        return
 
     if chat_id in chat_last_interaction:
         if now - chat_last_interaction[chat_id] > (AUTO_CLEAR_HOURS * 3600):
@@ -408,7 +389,7 @@ async def process_user_message_async(message: types.Message):
             raw_data = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
             base64_image = base64.b64encode(raw_data).decode("utf-8")
 
-            prompt_text = text_content if text_content else "Опиши этот товар и определи, что это такое."
+            prompt_text = text_content if text_content else "Опиши это изображение."
 
             vision_messages = [
                 {"role": "system", "content": chat_custom_instructions[chat_id]},
@@ -435,17 +416,10 @@ async def process_user_message_async(message: types.Message):
         except Exception as e:
             logging.error(f"Критическая ошибка загрузки фото: {e}")
 
-        final_reply = reply_text or "Рассмотрел товар на фото!"
-        
-        if any(w in lower_check for w in ["оплати", "купи", "заплати"]) and any(c.isdigit() for c in text_content):
-            await message.reply(clean_text_for_telegram(final_reply), parse_mode="HTML")
-            await process_payment_request(message, custom_title=text_content)
-            return
-
+        final_reply = reply_text or "Рассмотрел фото!"
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
         chat_history[chat_id].append({"role": "assistant", "content": final_reply})
-        processed_text = clean_text_for_telegram(final_reply)
-        await message.reply(processed_text, parse_mode="HTML")
+        await message.reply(clean_text_for_telegram(final_reply), parse_mode="HTML")
         return
 
     # Обработка голосовых (Whisper)
@@ -627,7 +601,9 @@ async def process_user_message_async(message: types.Message):
         await message.reply(html.escape(processed_text), parse_mode="HTML")
 
 async def main():
-    print(">>> Copilot AI запущен со всеми фичами и автозаказом через Playwright! <<<")
+    if not AMMER_PAY_API_TOKEN:
+        logging.warning("⚠️ Внимание: AMMER_PAY_API_TOKEN не задан в переменных окружения!")
+    print(">>> Copilot AI запущен со всеми фичами и крипто-выплатами через Ammer Pay! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
