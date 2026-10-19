@@ -1,17 +1,15 @@
-name: Bot Pipeline & CI/CD
+name: Run Copilot AI Bot
 
 on:
   push:
     branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
   schedule:
-    # Запуск каждые 5 часов для поддержания активности
+    # Перезапуск каждые 5 часов (так как у GitHub Actions есть лимит на 6 часов непрерывной работы одного таска)
     - cron: "0 */5 * * *"
   workflow_dispatch:
 
 jobs:
-  build-and-test:
+  run-bot:
     runs-on: ubuntu-latest
 
     env:
@@ -35,16 +33,7 @@ jobs:
           playwright install chromium
           playwright install-deps
 
-      - name: Проверка синтаксиса бота
+      - name: 🚀 ЗАПУСК БОТА (Вечный процесс)
         run: |
-          python -m py_compile bot.py
-
-  keep-alive:
-    needs: build-and-test
-    runs-on: ubuntu-latest
-    if: github.event_name == 'schedule'
-    
-    steps:
-      - name: Пинг-пасс по расписанию
-        run: echo "Пайплайн успешно отработал по расписанию!"
-        
+          python bot.py
+          
