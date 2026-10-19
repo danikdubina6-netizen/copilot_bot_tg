@@ -5,6 +5,7 @@ import random
 import re
 import html
 import base64
+import io
 import urllib.parse
 import urllib.request
 from bs4 import BeautifulSoup
@@ -16,6 +17,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from openai import OpenAI
 import time
 from playwright.async_api import async_playwright
+from PIL import Image
 
 logging.basicConfig(level=logging.INFO)
 
@@ -39,7 +41,9 @@ TEXT_MODELS = [
 ]
 
 VISION_MODELS = [
-    "qwen/qwen3.8-27b"
+    "qwen/qwen3.8-27b",
+    "llama-3.2-11b-vision-preview",
+    "llama-3.2-90b-vision-preview"
 ]
 
 BASE_INSTRUCTION = (
@@ -253,7 +257,7 @@ async def process_user_message_async(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
-    # Обработка фото через qwen/qwen3.8-27b с валидным max_tokens=1000
+    # Обработка фото с автосжатием и перебором кандидатов
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         reply_text = None
@@ -264,12 +268,21 @@ async def process_user_message_async(message: types.Message):
             photo_bytes_io = await bot.download_file(photo_file.file_path)
             
             raw_data = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
+            
+            try:
+                img = Image.open(io.BytesIO(raw_data))
+                img.thumbnail((1024, 1024))
+                buffer = io.BytesIO()
+                img.save(buffer, format="JPEG", quality=85)
+                raw_data = buffer.getvalue()
+            except Exception as img_err:
+                logging.warning(f"Сжатие PIL пропущено: {img_err}")
+
             base64_image = base64.b64encode(raw_data).decode("utf-8")
 
             prompt_text = text_content if text_content else (
-                "Кратко и емко перескажи главный смысл этой картинки/инфографики. "
-                "Опиши основные тезисы простым текстом без лишнего длинного форматирования, списков и разделителей, "
-                "чтобы текст был средним по длине и не обрывался!"
+                "Прочитай весь текст на этой картинке/инфографике и подробно перескажи суть "
+                "без длинных разделителей и сложных списков, чтобы ответ был средней длины!"
             )
 
             vision_messages = [
@@ -287,14 +300,19 @@ async def process_user_message_async(message: types.Message):
                 }
             ]
 
-            response = await asyncio.to_thread(
-                groq_client.chat.completions.create,
-                model="qwen/qwen3.8-27b",
-                messages=vision_messages,
-                max_tokens=1000
-            )
-            if response.choices and response.choices[0].message.content:
-                reply_text = response.choices[0].message.content
+            for model_name in VISION_MODELS:
+                try:
+                    response = await asyncio.to_thread(
+                        groq_client.chat.completions.create,
+                        model=model_name,
+                        messages=vision_messages,
+                        max_tokens=800
+                    )
+                    if response.choices and response.choices[0].message.content:
+                        reply_text = response.choices[0].message.content
+                        break
+                except Exception as api_err:
+                    logging.error(f"Модель {model_name} не ответила: {api_err}")
 
         except Exception as e:
             logging.error(f"Критическая ошибка обработки фото: {e}")
