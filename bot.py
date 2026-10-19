@@ -9,7 +9,7 @@ import urllib.parse
 import urllib.request
 from bs4 import BeautifulSoup
 from gtts import gTTS
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command
 from openai import OpenAI
 import time
@@ -18,6 +18,11 @@ logging.basicConfig(level=logging.INFO)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+# Платежный токен Portmone (тест-режим)
+PAYMENT_TOKEN = os.getenv("PAYMENT_TOKEN", "ТВОЙ_ТЕСТОВЫЙ_ТОКЕН_ПОРТМОНЕ")
+
+# БПП (Блок Предотвращения Потерь): Максимальный потолок безопасности (до 100 грн)
+MAX_ALLOWED_PAYMENT = 100 
 
 groq_client = None
 if GROQ_API_KEY:
@@ -36,7 +41,7 @@ TEXT_MODELS = [
     "openai/gpt-oss-20b"
 ]
 
-# Пул моделей для картинок
+# Пул моделей для картинок и анализа фото
 VISION_MODELS = [
     "qwen/qwen3.8-27b"
 ]
@@ -68,7 +73,7 @@ def search_web_real_sync(query: str, max_results=6) -> str:
     """Ультра-умный веб-поиск: вытягивает заголовок, текст и картинки"""
     try:
         clean_query = re.sub(r'[^\w\sА-Яа-яЁё]', ' ', query).strip()
-        clean_query = " ".join(clean_query.split()[:8])  # обрезаем длинные запросы
+        clean_query = " ".join(clean_query.split()[:8])
         encoded_query = urllib.parse.quote(clean_query)
         url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
         
@@ -149,7 +154,11 @@ async def start_cmd(message: types.Message):
     chat_history[chat_id] = []
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     chat_last_interaction[chat_id] = time.time()
-    await message.answer("Здарова! Я <b>Copilot AI</b>. Готов травить сарказм и выдавать годноту 😏", parse_mode="HTML")
+    await message.answer(
+        "Здарова! Я <b>Copilot AI</b>. Готов травить сарказм, оформлять заказы по фото и тексту с курьерской доставкой!\n\n"
+        "💳 <b>Как купить:</b> Скинь фото товара или напиши, например: <i>'Оплати мне футболку за 50 гривен'</i>", 
+        parse_mode="HTML"
+    )
 
 @dp.message(Command("reset"))
 async def reset_cmd(message: types.Message):
@@ -176,6 +185,94 @@ async def mode_cmd(message: types.Message):
     else:
         await message.reply("⚠️ Укажи режим, например: <code>/mode Будь максимально серьезным ученым</code>", parse_mode="HTML")
 
+# ==========================================
+# УМНАЯ ПЛАТЕЖНАЯ СИСТЕМА И КУРЬЕРСКАЯ ДОСТАВКА
+# ==========================================
+async def process_payment_request(message: types.Message, custom_title: str = None):
+    """Универсальная функция формирования инвойса с доставкой курьером"""
+    text = message.text or message.caption or ""
+    
+    numbers = re.findall(r'\d+(?:[.,]\d+)?', text)
+    amount = float(numbers[0].replace(',', '.')) if numbers else None
+    
+    if not amount or amount <= 0:
+        await message.reply(
+            "⚠️ Укажи сумму для оплаты товара, например:\n"
+            "<code>Оплати мне футболку за 50 гривен</code>", 
+            parse_mode="HTML"
+        )
+        return
+
+    if amount > MAX_ALLOWED_PAYMENT:
+        await message.reply(
+            f"🛑 <b>Превышен лимит безопасности!</b>\n"
+            f"Я провожу безопасные платежи на сумму до <b>{MAX_ALLOWED_PAYMENT} UAH</b>.",
+            parse_mode="HTML"
+        )
+        return
+
+    # Название товара
+    product_title = custom_title if custom_title else re.sub(r'/buy|\d+|грн|гривен|оплати|купи|заплати', '', text).strip()
+    if len(product_title) < 2:
+        product_title = "Товар по фото/запросу"
+
+    price_in_cents = int(amount * 100)
+
+    try:
+        await bot.send_invoice(
+            chat_id=message.chat.id,
+            title="Заказ с курьерской доставкой",
+            description=f"Товар: {product_title[:50]} | Сумма: {amount} UAH (Доставка курьером)",
+            payload=f"user_{message.from_user.id}_delivery_payload",
+            provider_token=PAYMENT_TOKEN,
+            currency="UAH",
+            prices=[types.LabeledPrice(label=product_title[:32], amount=price_in_cents)],
+            start_parameter="courier-delivery",
+            protect_content=True
+        )
+    except Exception as e:
+        logging.error(f"Ошибка выставления счета: {e}")
+        await message.reply("⚠️ Не удалось выставить счет. Проверь PAYMENT_TOKEN.")
+
+@dp.message(Command("buy"))
+async def buy_cmd(message: types.Message):
+    await process_payment_request(message)
+
+@dp.pre_checkout_query()
+async def pre_checkout_handler(pre_checkout_query: types.PreCheckoutQuery):
+    if pre_checkout_query.currency != "UAH":
+        await bot.answer_pre_checkout_query(
+            pre_checkout_query.id,
+            ok=False,
+            error_message="Эта функция доступна только на территории Украины!"
+        )
+        return
+
+    total_amount = pre_checkout_query.total_amount / 100
+    if total_amount > MAX_ALLOWED_PAYMENT:
+        await bot.answer_pre_checkout_query(
+            pre_checkout_query.id,
+            ok=False,
+            error_message=f"Сумма превышает лимит в {MAX_ALLOWED_PAYMENT} грн!"
+        )
+        return
+    
+    await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+
+@dp.message(F.successful_payment)
+async def successful_payment_handler(message: types.Message):
+    payment_info = message.successful_payment
+    amount_paid = payment_info.total_amount / 100
+    await message.reply(
+        f"🎉 <b>Оплата прошла успешно!</b>\n"
+        f"Списано: <b>{amount_paid} {payment_info.currency}</b>.\n"
+        f"📦 Товар оплачен, курьер уже выехал по твоему адресу, бро!",
+        parse_mode="HTML"
+    )
+
+# ==========================================
+# ОСНОВНОЙ ОБРАБОТЧИК СООБЩЕНИЙ
+# ==========================================
 @dp.message()
 async def handle_ai_response(message: types.Message):
     asyncio.create_task(process_user_message_async(message))
@@ -185,6 +282,12 @@ async def process_user_message_async(message: types.Message):
     chat_type = message.chat.type
     text_content = message.text or message.caption or ""
     now = time.time()
+
+    # Проверка текстового запроса на оплату (например, "оплати футболку за 50 грн")
+    lower_check = text_content.lower()
+    if any(word in lower_check for word in ["оплати", "купи", "заплати"]) and any(char.isdigit() for char in text_content):
+        await process_payment_request(message)
+        return
 
     if chat_id in chat_last_interaction:
         if now - chat_last_interaction[chat_id] > (AUTO_CLEAR_HOURS * 3600):
@@ -199,7 +302,7 @@ async def process_user_message_async(message: types.Message):
         chat_history[chat_id] = []
 
     # ==========================================
-    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО
+    # ПРИОРИТЕТ 1: ОБРАБОТКА ФОТО (С АНАЛИЗОМ И ВОЗМОЖНОСТЬЮ ОПЛАТЫ)
     # ==========================================
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
@@ -213,7 +316,7 @@ async def process_user_message_async(message: types.Message):
             raw_data = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
             base64_image = base64.b64encode(raw_data).decode("utf-8")
 
-            prompt_text = text_content if text_content else "Опиши и прокомментируй в своей текущей роли, что на этой картинке."
+            prompt_text = text_content if text_content else "Опиши этот товар и определи, что это такое."
 
             vision_messages = [
                 {"role": "system", "content": chat_custom_instructions[chat_id]},
@@ -231,23 +334,23 @@ async def process_user_message_async(message: types.Message):
                 }
             ]
 
-            while not reply_text:
-                for model_name in VISION_MODELS:
-                    res = await asyncio.to_thread(fetch_completion_sync, model_name, vision_messages, 500)
-                    if res and not res.startswith("ERR_API"):
-                        reply_text = res
-                        break
-                
-                if reply_text:
+            for model_name in VISION_MODELS:
+                res = await asyncio.to_thread(fetch_completion_sync, model_name, vision_messages, 500)
+                if res and not res.startswith("ERR_API"):
+                    reply_text = res
                     break
-                
-                await asyncio.sleep(5)
 
         except Exception as e:
             logging.error(f"Критическая ошибка загрузки фото: {e}")
 
-        final_reply = reply_text or "Не удалось рассмотреть картинку, попробуй еще раз!"
+        final_reply = reply_text or "Рассмотрел товар на фото!"
         
+        # Если в подписи к фото просят оплатить (например, "оплати за 50 грн"), запускаем оплату по фото!
+        if any(w in lower_check for w in ["оплати", "купи", "заплати"]) and any(c.isdigit() for c in text_content):
+            await message.reply(clean_text_for_telegram(final_reply), parse_mode="HTML")
+            await process_payment_request(message, custom_title=text_content)
+            return
+
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
         chat_history[chat_id].append({"role": "assistant", "content": final_reply})
         processed_text = clean_text_for_telegram(final_reply)
@@ -293,7 +396,6 @@ async def process_user_message_async(message: types.Message):
 
     lower_text = text_content.lower()
     
-    # Динамическое переключение поведения на лету из текста
     change_style_triggers = ["будь ", "стань ", "веди себя как ", "отвечай как ", "разговаривай как ", "пиши как ", "переключись на "]
     for trig in change_style_triggers:
         if lower_text.startswith(trig) or f" {trig}" in lower_text:
@@ -379,7 +481,7 @@ async def process_user_message_async(message: types.Message):
             return
 
     # ==========================================
-    # ГЕНЕРАЦИЯ КАРТИНКИ (УМНЫЙ КОНТРОЛЬ ЛЮДЕЙ)
+    # ГЕНЕРАЦИЯ КАРТИНКИ
     # ==========================================
     if any(trig in lower_text for trig in ["сгенерируй", "нарисуй", "создай картинку", "аватарка", "изображение"]):
         clean_prompt = text_content
@@ -427,7 +529,7 @@ async def process_user_message_async(message: types.Message):
         return
 
     # ==========================================
-    # УЛЬТРА-УМНЫЙ АКТУАЛЬНЫЙ ВЕБ-ПОИСК
+    # ВЕБ-ПОИСК
     # ==========================================
     explicit_search_triggers = ["найди", "погугли", "ищи", "загугли", "новости", "курс", "погода", "цена", "подтвердил", "взрыв", "слухи", "качай"]
     info_questions = ["кто такой", "что такое", "когда был", "где находится", "сколько стоит", "какой состав", "правда ли", "было ли"]
@@ -457,14 +559,12 @@ async def process_user_message_async(message: types.Message):
 
     reply_text = None
     
-    # 1. ШТАТНЫЙ РЕЖИМ (БЕЗ ЛИМИТА)
     for model_name in TEXT_MODELS:
         res = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload, 1000)
         if res and not res.startswith("ERR_API"):
             reply_text = res
             break
 
-    # 2. РЕЖИМ ЛИМИТА: БЕСКОНЕЧНЫЙ ШТУРМ ДО ПОБЕДЫ
     if not reply_text:
         logging.info(f"⚡ ЛИМИТ/СБОЙ В ЧАТЕ {chat_id}! Запускаем штурм серверов.")
         chat_history[chat_id] = []
@@ -499,7 +599,7 @@ async def process_user_message_async(message: types.Message):
         await message.reply(html.escape(processed_text), parse_mode="HTML")
 
 async def main():
-    print(">>> Copilot AI запущен! <<<")
+    print(">>> Copilot AI запущен с курьерской доставкой и оплатой! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
