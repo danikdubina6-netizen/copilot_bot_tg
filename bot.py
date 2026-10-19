@@ -12,8 +12,6 @@ from gtts import gTTS
 import aiohttp
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from openai import OpenAI
 import time
@@ -23,10 +21,6 @@ logging.basicConfig(level=logging.INFO)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-# Токен криптошлюза Ammer Pay из секретов/переменных окружения
-AMMER_PAY_API_TOKEN = os.getenv("AMMER_PAY_API_TOKEN")
-AMMER_PAYOUT_URL = "https://api.ammer.io/v1/payout"
 
 groq_client = None
 if GROQ_API_KEY:
@@ -61,12 +55,6 @@ BASE_INSTRUCTION = (
     "ПРАВИЛО КОНЦОВКИ: Завершай мысль полностью, без обрывов на полуслове! "
     "ЯЗЫК: ИСКЛЮЧИТЕЛЬНО РУССКИЙ ЯЗЫК."
 )
-
-# Состояния FSM для крипто-выплат пользователям через Ammer Pay
-class PayoutStates(StatesGroup):
-    waiting_for_currency = State()
-    waiting_for_amount = State()
-    waiting_for_wallet = State()
 
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -214,12 +202,7 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     chat_last_interaction[chat_id] = time.time()
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b>. Готов травить сарказм, генерировать картинки и отправлять крипту пользователям!\n\n"
-        "💸 <b>Выплаты:</b> Нажми кнопку ниже или введи команду <code>/payout</code>", 
-        reply_markup=types.ReplyKeyboardMarkup(
-            keyboard=[[types.KeyboardButton(text="💸 Сделать выплату крипты")]],
-            resize_keyboard=True
-        ),
+        "Здарова! Я <b>Copilot AI</b>. Готов травить сарказм, генерировать картинки и отвечать на любые вопросы!", 
         parse_mode="HTML"
     )
 
@@ -247,109 +230,6 @@ async def mode_cmd(message: types.Message):
         await message.reply(f"🎯 Поведение мгновенно изменено на: <b>{html.escape(new_persona)}</b>", parse_mode="HTML")
     else:
         await message.reply("⚠️ Укажи режим, например: <code>/mode Будь максимально серьезным ученым</code>", parse_mode="HTML")
-
-# ==========================================
-# МОДУЛЬ КРИПТО-ВЫПЛАТ (AMMER PAY)
-# ==========================================
-@dp.message(Command("payout"))
-@dp.message(F.text == "💸 Сделать выплату крипты")
-async def start_payout(message: types.Message, state: FSMContext):
-    await message.answer(
-        "Выберите криптовалюту для выплаты пользователю (например: USDT, TON, BTC, ETH):",
-        reply_markup=types.ReplyKeyboardMarkup(
-            keyboard=[
-                [types.KeyboardButton(text="USDT"), types.KeyboardButton(text="TON")],
-                [types.KeyboardButton(text="BTC"), types.KeyboardButton(text="ETH")]
-            ],
-            resize_keyboard=True
-        )
-    )
-    await state.set_state(PayoutStates.waiting_for_currency)
-
-@dp.message(PayoutStates.waiting_for_currency)
-async def process_currency(message: types.Message, state: FSMContext):
-    currency = message.text.upper()
-    await state.update_data(currency=currency)
-    
-    await message.answer(
-        f"Вы выбрали: <b>{currency}</b>.\nВведите сумму для выплаты:",
-        parse_mode="HTML",
-        reply_markup=types.ReplyKeyboardRemove()
-    )
-    await state.set_state(PayoutStates.waiting_for_amount)
-
-@dp.message(PayoutStates.waiting_for_amount)
-async def process_amount(message: types.Message, state: FSMContext):
-    try:
-        amount = float(message.text.replace(",", "."))
-        if amount <= 0:
-            raise ValueError()
-    except ValueError:
-        await message.answer("❌ Неверная сумма. Введите корректное число (например, 10 или 5.5):")
-        return
-
-    await state.update_data(amount=amount)
-    await message.answer("🌐 Введите адрес криптокошелька получателя:")
-    await state.set_state(PayoutStates.waiting_for_wallet)
-
-async def send_ammer_payout(wallet: str, amount: float, currency: str) -> tuple[bool, str]:
-    headers = {
-        "Authorization": f"Bearer {AMMER_PAY_API_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "address": wallet,
-        "amount": amount,
-        "currency": currency
-    }
-
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.post(AMMER_PAYOUT_URL, json=payload, headers=headers, timeout=15) as response:
-                data = await response.json()
-                if response.status == 200 and data.get("success"):
-                    tx_id = data.get("tx_id", "Успешно отправлено")
-                    return True, tx_id
-                else:
-                    error_msg = data.get("error", f"Ошибка сервера: {response.status}")
-                    return False, error_msg
-        except Exception as e:
-            return False, str(e)
-
-@dp.message(PayoutStates.waiting_for_wallet)
-async def process_wallet(message: types.Message, state: FSMContext):
-    wallet_address = message.text.strip()
-    data = await state.get_data()
-    
-    currency = data.get("currency")
-    amount = data.get("amount")
-
-    await message.answer("⏳ Обрабатываю выплату через Ammer Pay...")
-
-    success, result = await send_ammer_payout(wallet_address, amount, currency)
-
-    if success:
-        await message.answer(
-            f"✅ <b>Выплата успешно отправлена пользователю!</b>\n\n"
-            f"💰 Сумма: {amount} {currency}\n"
-            f"📬 Кошелек: <code>{wallet_address}</code>\n"
-            f"🔍 ID транзакции: <code>{result}</code>",
-            parse_mode="HTML"
-        )
-    else:
-        await message.answer(
-            f"❌ <b>Не удалось выполнить выплату.</b>\nПричина: {result}",
-            parse_mode="HTML"
-        )
-
-    await state.clear()
-    await message.answer(
-        "Главное меню:",
-        reply_markup=types.ReplyKeyboardMarkup(
-            keyboard=[[types.KeyboardButton(text="💸 Сделать выплату крипты")]],
-            resize_keyboard=True
-        )
-    )
 
 # ==========================================
 # ОСНОВНОЙ ОБРАБОТЧИК СООБЩЕНИЙ И ИИ
@@ -601,9 +481,7 @@ async def process_user_message_async(message: types.Message):
         await message.reply(html.escape(processed_text), parse_mode="HTML")
 
 async def main():
-    if not AMMER_PAY_API_TOKEN:
-        logging.warning("⚠️ Внимание: AMMER_PAY_API_TOKEN не задан в переменных окружения!")
-    print(">>> Copilot AI запущен со всеми фичами и крипто-выплатами через Ammer Pay! <<<")
+    print(">>> Copilot AI запущен в штатном режиме без лишнего крипто-мусора! <<<")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
