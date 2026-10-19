@@ -66,7 +66,7 @@ def search_web_real_sync(query: str, max_results=6) -> str:
     """Ультра-умный и глубокий веб-поиск 2026: вытягивает максимум релевантного текста из выдачи"""
     try:
         clean_query = re.sub(r'[^\w\sА-Яа-яЁё]', ' ', query).strip()
-        clean_query = " ".join(clean_query.split()[:8])  длинные запросы
+        clean_query = " ".join(clean_query.split()[:8])  # обрезаем длинные запросы
         encoded_query = urllib.parse.quote(clean_query)
         url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
         
@@ -368,7 +368,7 @@ async def process_user_message_async(message: types.Message):
             return
 
     # ==========================================
-    # ГЕНЕРАЦИЯ КАРТИНКИ
+    # ГЕНЕРАЦИЯ КАРТИНКИ (УМНЫЙ КОНТРОЛЬ ЛЮДЕЙ)
     # ==========================================
     if any(trig in lower_text for trig in ["сгенерируй", "нарисуй", "создай картинку", "аватарка", "изображение"]):
         clean_prompt = text_content
@@ -416,7 +416,7 @@ async def process_user_message_async(message: types.Message):
         return
 
     # ==========================================
-    # УЛЬТРА-УМНЫЙ АКТУАЛЬНЫЙ ВЕБ-ПОИСК (ОБНОВЛЕННЫЙ)
+    # УЛЬТРА-УМНЫЙ АКТУАЛЬНЫЙ ВЕБ-ПОИСК
     # ==========================================
     explicit_search_triggers = ["найди", "погугли", "ищи", "загугли", "новости", "курс", "погода", "цена", "подтвердил", "взрыв", "слухи"]
     info_questions = ["кто такой", "что такое", "когда был", "где находится", "сколько стоит", "какой состав", "правда ли", "было ли"]
@@ -450,6 +450,25 @@ async def process_user_message_async(message: types.Message):
     for model_name in TEXT_MODELS:
         res = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload, 1000)
         if res and not res.startswith("ERR_API"):
+            reply_text = res
+            break
+
+    # 2. РЕЖИМ ЛИМИТА: БЕСКОНЕЧНЫЙ ПАРАЛЛЕЛЬНЫЙ ШТУРМ ПО ВСЕМ МОДЕЛЯМ ДО ПОБЕДЫ
+    if not reply_text:
+        logging.info(f"⚡ ЛИМИТ/СБОЙ В ЧАТЕ {chat_id}! Запускаем бесконечный штурм всех серверов.")
+        chat_history[chat_id] = []
+        
+        clean_payload = [
+            {"role": "system", "content": chat_custom_instructions[chat_id]},
+            {"role": "user", "content": text_content + web_context}
+        ]
+        
+        while not reply_text:
+            tasks = [asyncio.to_thread(fetch_completion_sync, model_name, clean_payload, 1000) for model_name in TEXT_MODELS]
+            results = await asyncio.gather(*tasks)
+            
+            for res in results:
+                if isinstance(res, str) and res and not res.startswith("ERR_API"):
                     reply_text = res
                     break
             
