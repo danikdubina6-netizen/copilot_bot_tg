@@ -17,7 +17,13 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from openai import OpenAI
 import time
 from playwright.async_api import async_playwright
-from PIL import Image
+
+# Безопасный импорт Pillow (если нет — бот не упадет)
+try:
+    from PIL import Image
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
 
 logging.basicConfig(level=logging.INFO)
 
@@ -257,7 +263,7 @@ async def process_user_message_async(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
-    # Обработка фото с автосжатием и перебором кандидатов
+    # Обработка фото с безопасным сжатием (если Pillow доступен)
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         reply_text = None
@@ -269,14 +275,15 @@ async def process_user_message_async(message: types.Message):
             
             raw_data = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
             
-            try:
-                img = Image.open(io.BytesIO(raw_data))
-                img.thumbnail((1024, 1024))
-                buffer = io.BytesIO()
-                img.save(buffer, format="JPEG", quality=85)
-                raw_data = buffer.getvalue()
-            except Exception as img_err:
-                logging.warning(f"Сжатие PIL пропущено: {img_err}")
+            if HAS_PIL:
+                try:
+                    img = Image.open(io.BytesIO(raw_data))
+                    img.thumbnail((1024, 1024))
+                    buffer = io.BytesIO()
+                    img.save(buffer, format="JPEG", quality=85)
+                    raw_data = buffer.getvalue()
+                except Exception as img_err:
+                    logging.warning(f"Сжатие PIL пропущено: {img_err}")
 
             base64_image = base64.b64encode(raw_data).decode("utf-8")
 
