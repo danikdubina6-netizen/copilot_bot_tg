@@ -43,14 +43,16 @@ VISION_MODELS = [
 
 BASE_INSTRUCTION = (
     "Ты — Copilot AI. На дворе ОКТЯБРЬ 2026 ГОДА. "
-    "СТРОЖАЙШИЙ ЗАПРЕТ: Категорически запрещено писать фразы 'на момент обновления базы знаний', "
-    "'по состоянию на 2023 год', 'у меня нет доступа к верифицированным пресс-релизам', 'я лишь ИИ' и любые подобные отмазки! "
-    "Если в сообщении передан блок [ДАННЫЕ ИЗ СЕТИ (2026)], воспринимай его как абсолютную, стопроцентную реальность и факты из интернета. Не сомневайся в них и не придумывай отговорки про отсутствие документов. "
-    "ОБЩЕНИЕ И ВАЙБ: Отвечай коротко, живо и по делу! На короткие реплики и оценки ('имбо', 'красава') "
-    "не пиши лекции — поддерживай сленг и вайб собеседника, не душни. "
-    "ПРАВИЛО КОНЦОВКИ: Всегда рассчитывай объем ответа так, чтобы полностью завершить мысль, предложение и абзац. Никаких обрывов на полуслове! "
-    "ЯЗЫК: Отвечай ИСКЛЮЧИТЕЛЬНО НА РУССКОМ ЯЗЫКЕ! Никакого украинского или английского текста. "
-    "ФАКТЫ: Опирайся на факты из сети и логику беседы, уверенно подтверждай инфоповоды, если они есть в данных из сети."
+    "СТРОЖАЙШЕЕ ПРАВИЛО СМЕНЫ РОЛИ: Если пользователь просит сменить стиль, поведение, роль или режим общения "
+    "(например, '/mode ...', 'будь ...', 'стань ...', 'отвечай как ...'), ты ОБЯЗАН СТРОГО, БЕЗОГОВОРНО И МГНОВЕННО "
+    "переключиться на запрошенный стиль и соблюдать его на 100%! "
+    "СТИЛЬ ПО УМОЛЧАНИЮ: Отвечай с ЕДКИМ САРКАЗМОМ, ЖИВЫМ ЮМОРОМ И ИРОНИЕЙ! Будь веселым, рофли, используй сленг, подкалывай собеседника, но не будь злым. "
+    "СТРОГОЕ ПРАВИЛО БЕЗ ДУШНОТЫ: Никаких занудных лекций, извинений и формальщины! Забудь слова 'я лишь ИИ', 'ограничен базой', 'служебный блок' или 'у меня нет доступа'. "
+    "ПОДАЧИ ИНФОРМАЦИИ: Описывай любые новости и темы ПОДРОБНО, ИНТЕРЕСНО И СВОИМИ СЛОВАМИ. Без сухих кодовых вырезок и унылых списков! "
+    "ССЫЛКИ: Ссылки на источники вставляй ТОЛЬКО если пользователь прямо спросит 'дай ссылку' или 'где источник'. В остальных случаях — только твой сочный текст. "
+    "ИЗОБРАЖЕНИЯ В ТЕКСТЕ: Если к новости есть картинка, можешь прятать её в HTML-тег <a href='URL_КАРТИНКИ'>&#8203;</a> для превью. "
+    "ПРАВИЛО КОНЦОВКИ: Завершай мысль полностью, без обрывов на полуслове! "
+    "ЯЗЫК: ИСКЛЮЧИТЕЛЬНО РУССКИЙ ЯЗЫК."
 )
 
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -63,7 +65,7 @@ chat_last_interaction = {}
 AUTO_CLEAR_HOURS = 6
 
 def search_web_real_sync(query: str, max_results=6) -> str:
-    """Ультра-умный и глубокий веб-поиск 2026: вытягивает максимум релевантного текста из выдачи"""
+    """Ультра-умный веб-поиск: вытягивает заголовок, текст и картинки"""
     try:
         clean_query = re.sub(r'[^\w\sА-Яа-яЁё]', ' ', query).strip()
         clean_query = " ".join(clean_query.split()[:8])  # обрезаем длинные запросы
@@ -147,7 +149,7 @@ async def start_cmd(message: types.Message):
     chat_history[chat_id] = []
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     chat_last_interaction[chat_id] = time.time()
-    await message.answer("Здарова! Я <b>Copilot AI</b>. Чё как?", parse_mode="HTML")
+    await message.answer("Здарова! Я <b>Copilot AI</b>. Готов травить сарказм и выдавать годноту 😏", parse_mode="HTML")
 
 @dp.message(Command("reset"))
 async def reset_cmd(message: types.Message):
@@ -155,7 +157,7 @@ async def reset_cmd(message: types.Message):
     chat_history[chat_id] = []
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     chat_last_interaction[chat_id] = time.time()
-    await message.reply("🧠 Память очищена!")
+    await message.reply("🧠 Память стёрта! Начинаем стебать с чистого листа.")
 
 @dp.message(Command("mode"))
 async def mode_cmd(message: types.Message):
@@ -163,12 +165,16 @@ async def mode_cmd(message: types.Message):
     args = message.text.split(maxsplit=1)
     if len(args) > 1:
         new_persona = args[1]
-        chat_custom_instructions[chat_id] = f"{BASE_INSTRUCTION}\n\nПРИКАЗ ПО ПОВЕДЕНИЮ: {new_persona}"
+        chat_custom_instructions[chat_id] = (
+            f"Ты — Copilot AI (ОКТЯБРЬ 2026 ГОДА). ПРИКАЗ ПО ПОВЕДЕНИЮ: {new_persona}. "
+            "Соблюдай эту роль СТРОГО И БЕЗОГОВОРНО в каждом ответе! "
+            "Никакого нытья про 'я лишь ИИ', 'ограничен базой' или 'служебный блок'. Отвечай ПОДРОБНО, СВОИМИ СЛОВАМИ И НА РУССКОМ ЯЗЫКЕ."
+        )
         chat_history[chat_id] = []
         chat_last_interaction[chat_id] = time.time()
-        await message.reply(f"🎯 Поведение изменено: <b>{html.escape(new_persona)}</b>", parse_mode="HTML")
+        await message.reply(f"🎯 Поведение мгновенно изменено на: <b>{html.escape(new_persona)}</b>", parse_mode="HTML")
     else:
-        await message.reply("⚠️ Укажи режим, например: <code>/mode Будь дерзким</code>", parse_mode="HTML")
+        await message.reply("⚠️ Укажи режим, например: <code>/mode Будь максимально серьезным ученым</code>", parse_mode="HTML")
 
 @dp.message()
 async def handle_ai_response(message: types.Message):
@@ -207,7 +213,7 @@ async def process_user_message_async(message: types.Message):
             raw_data = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
             base64_image = base64.b64encode(raw_data).decode("utf-8")
 
-            prompt_text = text_content if text_content else "Опиши, что на этой картинке, и прокомментируй."
+            prompt_text = text_content if text_content else "Опиши и прокомментируй в своей текущей роли, что на этой картинке."
 
             vision_messages = [
                 {"role": "system", "content": chat_custom_instructions[chat_id]},
@@ -240,7 +246,7 @@ async def process_user_message_async(message: types.Message):
         except Exception as e:
             logging.error(f"Критическая ошибка загрузки фото: {e}")
 
-        final_reply = reply_text or "Не удалось обработать картинку."
+        final_reply = reply_text or "Не удалось рассмотреть картинку, попробуй еще раз!"
         
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
         chat_history[chat_id].append({"role": "assistant", "content": final_reply})
@@ -249,7 +255,7 @@ async def process_user_message_async(message: types.Message):
         return
 
     # ==========================================
-    # ОБРАБОТКА ГОЛОСОВЫХ И СТИЛИСТИКИ
+    # ОБРАБОТКА ГОЛОСОВЫХ И ДИНАМИЧЕСКОЙ СМЕНЫ СТИЛЯ
     # ==========================================
     temp_audio_path = None
     if message.voice:
@@ -282,16 +288,21 @@ async def process_user_message_async(message: types.Message):
             logging.error(f"Ошибка распознавания голосового: {e}")
             if temp_audio_path and os.path.exists(temp_audio_path):
                 os.remove(temp_audio_path)
-            await message.reply("⚠️ Ошибка распознавания голосового.")
+            await message.reply("⚠️ Не разобрал твоё бубнение, давай почетче!")
             return
 
     lower_text = text_content.lower()
     
+    # Динамическое переключение поведения на лету из текста
     change_style_triggers = ["будь ", "стань ", "веди себя как ", "отвечай как ", "разговаривай как ", "пиши как ", "переключись на "]
     for trig in change_style_triggers:
         if lower_text.startswith(trig) or f" {trig}" in lower_text:
             new_style = text_content
-            chat_custom_instructions[chat_id] = f"{BASE_INSTRUCTION}\n\nПРИКАЗ ПО ПОВЕДЕНИЮ: {new_style}"
+            chat_custom_instructions[chat_id] = (
+                f"Ты — Copilot AI (ОКТЯБРЬ 2026 ГОДА). ПРИКАЗ ПО ПОВЕДЕНИЮ: {new_style}. "
+                "Соблюдай эту роль СТРОГО И БЕЗОГОВОРНО в каждом ответе! "
+                "Никакого нытья про 'я лишь ИИ', 'ограничен базой' или 'служебный блок'. Отвечай ПОДРОБНО, СВОИМИ СЛОВАМИ И НА РУССКОМ ЯЗЫКЕ."
+            )
             chat_history[chat_id] = []
 
     is_voice_requested = lower_text.startswith("озв") or lower_text.startswith("скаж") or "озвучь" in lower_text or "скажи голосом" in lower_text
@@ -418,7 +429,7 @@ async def process_user_message_async(message: types.Message):
     # ==========================================
     # УЛЬТРА-УМНЫЙ АКТУАЛЬНЫЙ ВЕБ-ПОИСК
     # ==========================================
-    explicit_search_triggers = ["найди", "погугли", "ищи", "загугли", "новости", "курс", "погода", "цена", "подтвердил", "взрыв", "слухи"]
+    explicit_search_triggers = ["найди", "погугли", "ищи", "загугли", "новости", "курс", "погода", "цена", "подтвердил", "взрыв", "слухи", "качай"]
     info_questions = ["кто такой", "что такое", "когда был", "где находится", "сколько стоит", "какой состав", "правда ли", "было ли"]
     
     need_web_search = False
@@ -434,7 +445,7 @@ async def process_user_message_async(message: types.Message):
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         search_result = await asyncio.to_thread(search_web_real_sync, text_content)
         if search_result:
-            web_context = f"\n\n[ДАННЫЕ ИЗ СЕТИ (ОКТЯБРЬ 2026)]:\n{search_result}"
+            web_context = f"\n\n[СВЕЖИЕ ДАННЫЕ ИЗ СЕТИ]:\n{search_result}"
 
     await bot.send_chat_action(chat_id=chat_id, action="typing")
     
@@ -446,16 +457,16 @@ async def process_user_message_async(message: types.Message):
 
     reply_text = None
     
-    # 1. ШТАТНЫЙ РЕЖИМ (БЕЗ ЛИМИТА): Мгновенный ответ за миллисекунды
+    # 1. ШТАТНЫЙ РЕЖИМ (БЕЗ ЛИМИТА)
     for model_name in TEXT_MODELS:
         res = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload, 1000)
         if res and not res.startswith("ERR_API"):
             reply_text = res
             break
 
-    # 2. РЕЖИМ ЛИМИТА: БЕСКОНЕЧНЫЙ ПАРАЛЛЕЛЬНЫЙ ШТУРМ ПО ВСЕМ МОДЕЛЯМ ДО ПОБЕДЫ
+    # 2. РЕЖИМ ЛИМИТА: БЕСКОНЕЧНЫЙ ШТУРМ ДО ПОБЕДЫ
     if not reply_text:
-        logging.info(f"⚡ ЛИМИТ/СБОЙ В ЧАТЕ {chat_id}! Запускаем бесконечный штурм всех серверов.")
+        logging.info(f"⚡ ЛИМИТ/СБОЙ В ЧАТЕ {chat_id}! Запускаем штурм серверов.")
         chat_history[chat_id] = []
         
         clean_payload = [
