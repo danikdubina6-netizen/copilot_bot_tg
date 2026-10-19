@@ -253,7 +253,7 @@ async def process_user_message_async(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
-    # Обработка фото через qwen/qwen3.8-27b с увеличенным лимитом токенов
+    # Обработка фото через qwen/qwen3.8-27b с валидным max_tokens=1000
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         reply_text = None
@@ -266,7 +266,11 @@ async def process_user_message_async(message: types.Message):
             raw_data = photo_bytes_io.read() if hasattr(photo_bytes_io, 'read') else photo_bytes_io.getvalue()
             base64_image = base64.b64encode(raw_data).decode("utf-8")
 
-            prompt_text = text_content if text_content else "Подробно опиши всё, что написано и изображено на этой картинке."
+            prompt_text = text_content if text_content else (
+                "Кратко и емко перескажи главный смысл этой картинки/инфографики. "
+                "Опиши основные тезисы простым текстом без лишнего длинного форматирования, списков и разделителей, "
+                "чтобы текст был средним по длине и не обрывался!"
+            )
 
             vision_messages = [
                 {
@@ -287,7 +291,7 @@ async def process_user_message_async(message: types.Message):
                 groq_client.chat.completions.create,
                 model="qwen/qwen3.8-27b",
                 messages=vision_messages,
-                max_tokens=1500
+                max_tokens=1000
             )
             if response.choices and response.choices[0].message.content:
                 reply_text = response.choices[0].message.content
