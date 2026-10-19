@@ -18,7 +18,6 @@ from openai import OpenAI
 import time
 from playwright.async_api import async_playwright
 
-# Безопасный импорт Pillow (если нет — бот не упадет)
 try:
     from PIL import Image
     HAS_PIL = True
@@ -47,9 +46,7 @@ TEXT_MODELS = [
 ]
 
 VISION_MODELS = [
-    "qwen/qwen3.8-27b",
-    "llama-3.2-11b-vision-preview",
-    "llama-3.2-90b-vision-preview"
+    "qwen/qwen3.8-27b"
 ]
 
 BASE_INSTRUCTION = (
@@ -263,7 +260,7 @@ async def process_user_message_async(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
-    # Обработка фото с безопасным сжатием (если Pillow доступен)
+    # Обработка фото с бесконечным циклом повтора до успешного ответа модели
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         reply_text = None
@@ -307,19 +304,26 @@ async def process_user_message_async(message: types.Message):
                 }
             ]
 
-            for model_name in VISION_MODELS:
-                try:
-                    response = await asyncio.to_thread(
-                        groq_client.chat.completions.create,
-                        model=model_name,
-                        messages=vision_messages,
-                        max_tokens=800
-                    )
-                    if response.choices and response.choices[0].message.content:
-                        reply_text = response.choices[0].message.content
-                        break
-                except Exception as api_err:
-                    logging.error(f"Модель {model_name} не ответила: {api_err}")
+            # Бесконечный цикл попыток до победного ответа модели
+            attempt = 1
+            while not reply_text:
+                for model_name in VISION_MODELS:
+                    try:
+                        response = await asyncio.to_thread(
+                            groq_client.chat.completions.create,
+                            model=model_name,
+                            messages=vision_messages,
+                            max_tokens=800
+                        )
+                        if response.choices and response.choices[0].message.content:
+                            reply_text = response.choices[0].message.content
+                            break
+                    except Exception as api_err:
+                        logging.warning(f"Попытка {attempt}: модель {model_name} отклонила запрос ({api_err}), ждем 15 сек...")
+                
+                if not reply_text:
+                    attempt += 1
+                    await asyncio.sleep(15)  # Пауза перед следующей бесконечной попыткой
 
         except Exception as e:
             logging.error(f"Критическая ошибка обработки фото: {e}")
@@ -408,7 +412,7 @@ async def process_user_message_async(message: types.Message):
                 reaction=[types.ReactionTypeEmoji(emoji=requested_emoji)]
             )
         except Exception as e:
-            logging.error(f"Ошибка реакций: {e}")
+          logging.error(f"Ошибка реакций: {e}")
 
     # Озвучка текста (gTTS)
     if is_voice_requested:
