@@ -44,15 +44,13 @@ VISION_MODELS = [
 BASE_INSTRUCTION = (
     "Ты — Copilot AI. На дворе ОКТЯБРЬ 2026 ГОДА. "
     "СТРОЖАЙШИЙ ЗАПРЕТ: Категорически запрещено писать фразы 'на момент обновления базы знаний', "
-    "'по состоянию на 2023 год', 'мои знания ограничены', 'я лишь ИИ' и любые подобные отмазки! "
-    "Если в сообщении передан [ДАННЫЕ ИЗ СЕТИ (2026)], используй их как свежайшие факты прямо из интернета. "
-    "ОБЩЕНИЕ И ВАЙБ: Отвечай коротко, живо и по делу! На короткие реплики и оценки ('имбо', 'красава', 'так я оценил') "
-    "не пиши лекции и аналитику — поддерживай сленг и вайб собеседника, не душни. "
+    "'по состоянию на 2023 год', 'у меня нет доступа к верифицированным пресс-релизам', 'я лишь ИИ' и любые подобные отмазки! "
+    "Если в сообщении передан блок [ДАННЫЕ ИЗ СЕТИ (2026)], воспринимай его как абсолютную, стопроцентную реальность и факты из интернета. Не сомневайся в них и не придумывай отговорки про отсутствие документов. "
+    "ОБЩЕНИЕ И ВАЙБ: Отвечай коротко, живо и по делу! На короткие реплики и оценки ('имбо', 'красава') "
+    "не пиши лекции — поддерживай сленг и вайб собеседника, не душни. "
     "ПРАВИЛО КОНЦОВКИ: Всегда рассчитывай объем ответа так, чтобы полностью завершить мысль, предложение и абзац. Никаких обрывов на полуслове! "
     "ЯЗЫК: Отвечай ИСКЛЮЧИТЕЛЬНО НА РУССКОМ ЯЗЫКЕ! Никакого украинского или английского текста. "
-    "ФАКТЫ: Не выдумывай несуществующие факты. "
-    "СМЕНА СТИЛЯ: Если пользователь просит сменить стиль — исполняй строго и безоговорочно. "
-    "Никогда не упоминай сторонние компании или нейросети (Google, OpenAI и др.)."
+    "ФАКТЫ: Опирайся на факты из сети и логику беседы, уверенно подтверждай инфоповоды, если они есть в данных из сети."
 )
 
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -64,19 +62,20 @@ group_message_counters = {}
 chat_last_interaction = {}
 AUTO_CLEAR_HOURS = 6
 
-def search_web_real_sync(query: str, max_results=5) -> str:
-    """Ультра-умный веб-поиск: вытягивает заголовки и сниппеты из сети"""
+def search_web_real_sync(query: str, max_results=6) -> str:
+    """Ультра-умный и глубокий веб-поиск 2026: вытягивает максимум релевантного текста из выдачи"""
     try:
-        clean_query = re.sub(r'[^\w\sА-Яа-яЁё]', '', query).strip()
+        clean_query = re.sub(r'[^\w\sА-Яа-яЁё]', ' ', query).strip()
+        clean_query = " ".join(clean_query.split()[:8])  длинные запросы
         encoded_query = urllib.parse.quote(clean_query)
         url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
         
         req = urllib.request.Request(
             url, 
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'}
         )
         
-        with urllib.request.urlopen(req, timeout=4) as response:
+        with urllib.request.urlopen(req, timeout=5) as response:
             html_content = response.read().decode('utf-8', errors='ignore')
             soup = BeautifulSoup(html_content, 'html.parser')
             
@@ -88,8 +87,8 @@ def search_web_real_sync(query: str, max_results=5) -> str:
                 title = title_tag.get_text(strip=True) if title_tag else ""
                 snippet = snippet_tag.get_text(strip=True) if snippet_tag else ""
                 
-                combined = f"{title}: {snippet}" if title else snippet
-                if combined and len(combined) > 15:
+                combined = f"{title} — {snippet}" if title else snippet
+                if combined and len(combined) > 20:
                     snippets.append(combined)
                 
                 if len(snippets) >= max_results:
@@ -98,7 +97,7 @@ def search_web_real_sync(query: str, max_results=5) -> str:
             if snippets:
                 return "\n• " + "\n• ".join(snippets)
     except Exception as e:
-        logging.warning(f"Ошибка веб-поиска: {e}")
+        logging.warning(f"Ошибка умного веб-поиска: {e}")
     return ""
 
 def clean_text_for_telegram(text: str) -> str:
@@ -369,7 +368,7 @@ async def process_user_message_async(message: types.Message):
             return
 
     # ==========================================
-    # ГЕНЕРАЦИЯ КАРТИНКИ (УМНЫЙ КОНТРОЛЬ ЛЮДЕЙ)
+    # ГЕНЕРАЦИЯ КАРТИНКИ
     # ==========================================
     if any(trig in lower_text for trig in ["сгенерируй", "нарисуй", "создай картинку", "аватарка", "изображение"]):
         clean_prompt = text_content
@@ -391,7 +390,7 @@ async def process_user_message_async(message: types.Message):
                         "content": (
                             "You are a strict text-to-image prompt generator. Translate the user prompt to English. "
                             "RULE 1: Add humans, people, or characters ONLY if the user's prompt explicitly contains words like 'человек', 'люди', 'девушка', 'парень', 'женщина', 'мужчина', 'person', 'woman', 'man', 'girl', 'boy'. "
-                            "RULE 2: If the prompt is about objects, cars, nature, buildings, or says 'без человека' / 'без людей', you MUST ensure NO humans are in the prompt (add words like 'empty street, solo object, no people'). "
+                            "RULE 2: If the prompt is about objects, cars, nature, buildings, you MUST ensure NO humans are in the prompt (add words like 'empty street, solo object, no people'). "
                             "Output ONLY the final clean English image prompt."
                         )
                     },
@@ -417,17 +416,17 @@ async def process_user_message_async(message: types.Message):
         return
 
     # ==========================================
-    # ТОЧЕЧНЫЙ УМНЫЙ ВЕБ-ПОИСК
+    # УЛЬТРА-УМНЫЙ АКТУАЛЬНЫЙ ВЕБ-ПОИСК (ОБНОВЛЕННЫЙ)
     # ==========================================
-    explicit_search_triggers = ["найди", "погугли", "ищи", "загугли", "новости", "курс", "погода", "цена"]
-    info_questions = ["кто такой", "что такое", "когда был", "где находится", "сколько стоит", "какой состав"]
+    explicit_search_triggers = ["найди", "погугли", "ищи", "загугли", "новости", "курс", "погода", "цена", "подтвердил", "взрыв", "слухи"]
+    info_questions = ["кто такой", "что такое", "когда был", "где находится", "сколько стоит", "какой состав", "правда ли", "было ли"]
     
     need_web_search = False
     if any(re.search(rf'\b{re.escape(trig)}\b', lower_text) for trig in explicit_search_triggers):
         need_web_search = True
     elif any(trig in lower_text for trig in info_questions):
         need_web_search = True
-    elif "?" in text_content and any(year in lower_text for year in ["2026", "2025", "2024"]):
+    elif "?" in text_content or any(year in lower_text for year in ["2026", "2025", "2024"]):
         need_web_search = True
 
     web_context = ""
@@ -435,7 +434,7 @@ async def process_user_message_async(message: types.Message):
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         search_result = await asyncio.to_thread(search_web_real_sync, text_content)
         if search_result:
-            web_context = f"\n\n[ДАННЫЕ ИЗ СЕТИ (2026)]:\n{search_result}"
+            web_context = f"\n\n[ДАННЫЕ ИЗ СЕТИ (ОКТЯБРЬ 2026)]:\n{search_result}"
 
     await bot.send_chat_action(chat_id=chat_id, action="typing")
     
@@ -451,25 +450,6 @@ async def process_user_message_async(message: types.Message):
     for model_name in TEXT_MODELS:
         res = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload, 1000)
         if res and not res.startswith("ERR_API"):
-            reply_text = res
-            break
-
-    # 2. РЕЖИМ ЛИМИТА: БЕСКОНЕЧНЫЙ ПАРАЛЛЕЛЬНЫЙ ШТУРМ ПО ВСЕМ МОДЕЛЯМ ДО ПОБЕДЫ
-    if not reply_text:
-        logging.info(f"⚡ ЛИМИТ/СБОЙ В ЧАТЕ {chat_id}! Запускаем бесконечный штурм всех серверов.")
-        chat_history[chat_id] = []
-        
-        clean_payload = [
-            {"role": "system", "content": chat_custom_instructions[chat_id]},
-            {"role": "user", "content": text_content + web_context}
-        ]
-        
-        while not reply_text:
-            tasks = [asyncio.to_thread(fetch_completion_sync, model_name, clean_payload, 1000) for model_name in TEXT_MODELS]
-            results = await asyncio.gather(*tasks)
-            
-            for res in results:
-                if isinstance(res, str) and res and not res.startswith("ERR_API"):
                     reply_text = res
                     break
             
