@@ -158,7 +158,7 @@ def clean_text_for_telegram(text: str) -> str:
         escaped_content = html.escape(stripped_content)
         return f"<pre><code>{escaped_content}</code></pre>"
         
-    text = re.sub(r'```([a-zA-Z]*)\n?(.*?)```', code_block_replacer, text, flags=logicals := re.DOTALL)
+    text = re.sub(r'```([a-zA-Z]*)\n?(.*?)```', code_block_replacer, text, flags=re.DOTALL)
     text = re.sub(r'`([^`]+?)`', lambda m: "<code>" + html.escape(m.group(1)) + "</code>", text)
     text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'(?<!\s)\*(?!\s)(.*?)(?<!\s)\*(?!\w)', r'<i>\1</i>', text)
@@ -220,8 +220,7 @@ async def mode_cmd(message: types.Message):
         new_persona = args[1]
         chat_custom_instructions[chat_id] = (
             f"Ты — Copilot AI (ОКТЯБРЬ 2026 ГОДА). ПРИКАЗ ПО ПОВЕДЕНИЮ: {new_persona}. "
-            "Соблюдай эту роль СТРОГО И БЕЗОГОВОРНО в каждом ответе! "
-            "Отвечай КРАТКО, ЕМКО И НА РУССКОМ ЯЗЫКЕ."
+            "Соблюдай эту роль СТРОГО И БЕЗОГОВОРНО в каждом ответе! Отвечай КРАТКО, ЕМКО И НА РУССКОМ ЯЗЫКЕ."
         )
         chat_history[chat_id] = []
         chat_last_interaction[chat_id] = time.time()
@@ -460,7 +459,6 @@ async def process_user_message_async(message: types.Message):
 
     reply_text = None
     for model_name in TEXT_MODELS:
-        # Лимит max_toks=450 гарантирует средний, лаконичный ответ без обрывов
         res = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload, 450)
         if res and not res.startswith("ERR_API"):
             reply_text = res
