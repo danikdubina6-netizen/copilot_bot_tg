@@ -5,30 +5,25 @@ on:
     branches: [ "main", "master" ]
   workflow_dispatch:
   schedule:
-    - cron: '0 */5 * * *'  # Автоматический перезапуск каждые 5 часов, чтобы обходить лимит GitHub
+    - cron: '0 */5 * * *'
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Чеккаут кода из репозитория
-        uses: actions/checkout@v4
-
-      - name: Установка Python 3.11
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Установка системных зависимостей (FFmpeg для голосовых)
+      - name: Установка системных зависимостей и Playwright
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
-
-      - name: Установка библиотек Python
-        run: |
+          sudo apt-get install -y ffmpeg libglib2.0-0 libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2
           python -m pip install --upgrade pip
-          pip install aiogram openai gTTS beautifulsoup4
+          pip install aiogram openai gTTS beautifulsoup4 playwright
+          playwright install --with-deps chromium
 
       - name: Запуск бота
         env:
