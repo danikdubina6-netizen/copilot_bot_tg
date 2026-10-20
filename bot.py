@@ -67,13 +67,13 @@ chat_history = {}
 chat_custom_instructions = {}
 group_message_counters = {}
 chat_last_interaction = {}
+user_last_request_time = {}  # Персональный антиспам-лимит для каждого пользователя
 AUTO_CLEAR_HOURS = 6
 
 # ==========================================
 # МОДУЛЬ ВЕБ-АВТОМАТИЗАЦИИ (PLAYWRIGHT)
 # ==========================================
 async def automate_web_order(item_name: str, address: str, phone: str, user_name: str) -> bool:
-    """Браузерный робот: открывает сайт, ищет товар, добавляет в корзину и заполняет форму"""
     logging.info(f"🤖 Старт браузерного бота для заказа '{item_name}' по адресу '{address}'...")
     try:
         async with async_playwright() as p:
@@ -244,9 +244,17 @@ async def handle_ai_response(message: types.Message):
 
 async def process_user_message_async(message: types.Message):
     chat_id = message.chat.id
+    user_id = message.from_user.id if message.from_user else chat_id
     chat_type = message.chat.type
     text_content = message.text or message.caption or ""
     now = time.time()
+
+    # Персональная защита конкретного юзера от спам-лимитов (интервал 2.5 секунды между сообщениями)
+    if user_id in user_last_request_time:
+        if now - user_last_request_time[user_id] < 2.5:
+            await message.reply("⏳ Эй, полегче! Не строчи так быстро, дай подумать.")
+            return
+    user_last_request_time[user_id] = now
 
     if chat_id in chat_last_interaction:
         if now - chat_last_interaction[chat_id] > (AUTO_CLEAR_HOURS * 3600):
@@ -260,7 +268,7 @@ async def process_user_message_async(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
-    # Обработка фото с бесконечным циклом повтора до успешного ответа модели
+    # Обработка фото
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         reply_text = None
@@ -304,7 +312,6 @@ async def process_user_message_async(message: types.Message):
                 }
             ]
 
-            # Бесконечный цикл попыток до победного ответа модели
             attempt = 1
             while not reply_text:
                 for model_name in VISION_MODELS:
@@ -319,11 +326,11 @@ async def process_user_message_async(message: types.Message):
                             reply_text = response.choices[0].message.content
                             break
                     except Exception as api_err:
-                        logging.warning(f"Попытка {attempt}: модель {model_name} отклонила запрос ({api_err}), ждем 15 сек...")
+                        logging.warning(f"Попытка {attempt}: модель {model_name} отклонила запрос ({api_err}), ждем 10 сек...")
                 
                 if not reply_text:
                     attempt += 1
-                    await asyncio.sleep(15)  # Пауза перед следующей бесконечной попыткой
+                    await asyncio.sleep(10)
 
         except Exception as e:
             logging.error(f"Критическая ошибка обработки фото: {e}")
@@ -444,7 +451,6 @@ async def process_user_message_async(message: types.Message):
             return
 
     # Генерация картинок (Pollinations)
-        # Генерация картинок (Pollinations)
     if any(trig in lower_text for trig in ["сгенерируй", "нарисуй", "создай картинку", "аватарка", "изображение"]):
         clean_prompt = text_content
         for trig in ["сгенерируй", "нарисуй", "создай картинку", "создай", "изображение", "картинку", "аватарка", "где"]:
