@@ -1,91 +1,42 @@
 import os
-import asyncio
-import logging
-import html
-from pyrogram import Client, filters
-from pyrogram.types import Message
+import telebot
 from openai import OpenAI
 
-logging.basicConfig(level=logging.INFO)
-
-# Получаем данные из переменных окружения
-API_ID = int(os.getenv("API_ID", "0"))
-API_HASH = os.getenv("API_HASH", "")
+# Получаем ключи из секретов GitHub
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-groq_client = None
-if GROQ_API_KEY:
-    groq_client = OpenAI(
-        base_url="https://api.groq.com/openai/v1",
-        api_key=GROQ_API_KEY
-    )
+bot = telebot.TeleBot(BOT_TOKEN)
 
-# Инициализация Pyrogram юзербота (сессия сохранится в файл my_secretary.session)
-app = Client(
-    "my_secretary",
-    api_id=API_ID,
-    api_hash=API_HASH
+# Клиент Groq для генерации ответов через ИИ
+ai_client = OpenAI(
+    base_url="https://api.groq.com/openai/v1",
+    api_key=GROQ_API_KEY
 )
 
-# Память для диалогов секретаря
-secretary_history = {}
+SYSTEM_PROMPT = """
+Ты — вежливый и умный ИИ-секретарь. Отвечай кратко, вежливо и по делу на сообщения пользователей.
+"""
 
-SECRETARY_INSTRUCTION = (
-    "Ты — умный ИИ-секретарь Матвея. Хозяина сейчас нет в сети (AFK). "
-    "Твоя задача — вежливо, сдержанно и емко отвечать собеседнику в личных сообщениях от лица секретаря. "
-    "Передавай суть, отвечай на вопросы по делу, не пиши слишком длинно, чтобы текст помещался на экран смартфона. "
-    "Язык: исключительно русский."
-)
-
-@app.on_message(filters.private & ~filters.me & ~filters.bot)
-async def handle_afk_dm(client: Client, message: Message):
-    chat_id = message.chat.id
-    user_text = message.text or message.caption
+@bot.message_handler(func=lambda message: True)
+def handle_all_messages(message):
+    user_text = message.text or "[Медиа или файл]"
     
-    if not user_text or not groq_client:
-        return
-
     try:
-        # Проверяем статус владельца аккаунта (тебя) через get_me() или общие чаты, 
-        # но проще проверить статус текущего юзера: если ты онлайн, бот молчит.
-        me = await client.get_me()
-        # В Pyrogram статус 'online' означает, что владелец в сети
-        if me.status and str(me.status).lower() == "userstatus.online":
-            return  # Хозяин в сети — секретарь молчит
-    except Exception as e:
-        logging.warning(f"Не удалось проверить статус: {e}")
-
-    # Если тебя нет в сети — секретарь берет трубку
-    logging.info(f"🤖 Секретарь отвечает в ЛС для {chat_id}: {user_text}")
-
-    if chat_id not in secretary_history:
-        secretary_history[chat_id] = []
-
-    secretary_history[chat_id].append({"role": "user", "content": user_text})
-    if len(secretary_history[chat_id]) > 6:
-        secretary_history[chat_id] = secretary_history[chat_id][-6:]
-
-    messages_payload = [{"role": "system", "content": SECRETARY_INSTRUCTION}] + secretary_history[chat_id]
-
-    try:
-        response = await asyncio.to_thread(
-            groq_client.chat.completions.create,
-            model="qwen/qwen3.8-27b",
-            messages=messages_payload,
-            max_tokens=400
+        response = ai_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_text}
+            ],
+            max_tokens=300
         )
-        
-        reply_text = response.choices[0].message.content if response.choices else "Хозяин отошел, передам ему сообщение позже."
+        ai_reply = response.choices[0].message.content
+        bot.reply_to(message, f"🤖 [ИИ-Секретарь]: {ai_reply}")
     except Exception as e:
-        logging.error(f"Ошибка ИИ-секретаря: {e}")
-        reply_text = "В данный момент я занят другими делами, отвечу позже."
-
-    secretary_history[chat_id].append({"role": "assistant", "content": reply_text})
-    
-    # Отправляем ответ в ЛС от твоего имени (как секретарь)
-    await message.reply(f"🤖 <i>[Авто-секретарь]:</i> {html.escape(reply_text)}", parse_mode="HTML")
+        print(f"Ошибка ИИ: {e}")
 
 if __name__ == "__main__":
-    print(">>> ИИ-Секретарь запущен и ждет сообщения в ЛС! <<<")
-    app.run()
-      
+    print("Бот-секретарь запущен...")
+    bot.infinity_polling()
+    
