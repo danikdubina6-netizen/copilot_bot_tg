@@ -189,7 +189,7 @@ def parse_requested_emoji(text: str) -> str | None:
     if "гнев" in lower or "злой" in lower or "💢" in lower: return "💢"
     return None
 
-def fetch_completion_sync(model_name, messages, max_toks=450):
+def fetch_completion_sync(model_name, messages, max_toks=1300):
     try:
         response = groq_client.chat.completions.create(model=model_name, messages=messages, max_tokens=max_toks)
         if response.choices and response.choices[0].message.content:
@@ -313,7 +313,7 @@ async def process_user_message_async(message: types.Message):
                             groq_client.chat.completions.create,
                             model=model_name,
                             messages=vision_messages,
-                            max_tokens=800
+                            max_tokens=1300
                         )
                         if response.choices and response.choices[0].message.content:
                             reply_text = response.choices[0].message.content
@@ -412,7 +412,7 @@ async def process_user_message_async(message: types.Message):
                 reaction=[types.ReactionTypeEmoji(emoji=requested_emoji)]
             )
         except Exception as e:
-          logging.error(f"Ошибка реакций: {e}")
+            logging.error(f"Ошибка реакций: {e}")
 
     # Озвучка текста (gTTS)
     if is_voice_requested:
@@ -454,8 +454,7 @@ async def process_user_message_async(message: types.Message):
         
         encoded_prompt = urllib.parse.quote(clean_prompt)
         image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model=flux&width=1024&height=1024&nologo=true&seed={random.randint(1, 999999)}"
-        
-        try:
+                   try:
             await message.reply_photo(photo=image_url, caption=f"🎨 <b>{html.escape(clean_prompt)}</b>", parse_mode="HTML")
             return
         except Exception as e:
@@ -494,7 +493,7 @@ async def process_user_message_async(message: types.Message):
 
     reply_text = None
     for model_name in TEXT_MODELS:
-        res = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload, 450)
+        res = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload, 1300)
         if res and not res.startswith("ERR_API"):
             reply_text = res
             break
