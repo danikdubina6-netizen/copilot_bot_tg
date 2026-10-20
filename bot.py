@@ -67,7 +67,6 @@ chat_history = {}
 chat_custom_instructions = {}
 group_message_counters = {}
 chat_last_interaction = {}
-user_last_request_time = {}  # Персональный антиспам-лимит для каждого пользователя
 AUTO_CLEAR_HOURS = 6
 
 # ==========================================
@@ -244,17 +243,9 @@ async def handle_ai_response(message: types.Message):
 
 async def process_user_message_async(message: types.Message):
     chat_id = message.chat.id
-    user_id = message.from_user.id if message.from_user else chat_id
     chat_type = message.chat.type
     text_content = message.text or message.caption or ""
     now = time.time()
-
-    # Персональная защита конкретного юзера от спам-лимитов (интервал 2.5 секунды между сообщениями)
-    if user_id in user_last_request_time:
-        if now - user_last_request_time[user_id] < 2.5:
-            await message.reply("⏳ Эй, полегче! Не строчи так быстро, дай подумать.")
-            return
-    user_last_request_time[user_id] = now
 
     if chat_id in chat_last_interaction:
         if now - chat_last_interaction[chat_id] > (AUTO_CLEAR_HOURS * 3600):
