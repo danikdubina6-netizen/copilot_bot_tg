@@ -444,6 +444,7 @@ async def process_user_message_async(message: types.Message):
             return
 
     # Генерация картинок (Pollinations)
+        # Генерация картинок (Pollinations)
     if any(trig in lower_text for trig in ["сгенерируй", "нарисуй", "создай картинку", "аватарка", "изображение"]):
         clean_prompt = text_content
         for trig in ["сгенерируй", "нарисуй", "создай картинку", "создай", "изображение", "картинку", "аватарка", "где"]:
@@ -453,7 +454,7 @@ async def process_user_message_async(message: types.Message):
         await bot.send_chat_action(chat_id=chat_id, action="upload_photo")
         
         encoded_prompt = urllib.parse.quote(clean_prompt)
-         image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model=flux&width=1024&height=1024&nologo=true&seed={random.randint(1, 999999)}"
+        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model=flux&width=1024&height=1024&nologo=true&seed={random.randint(1, 999999)}"
         try:
             await message.reply_photo(photo=image_url, caption=f"🎨 <b>{html.escape(clean_prompt)}</b>", parse_mode="HTML")
             return
