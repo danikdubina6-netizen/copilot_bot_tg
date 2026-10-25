@@ -497,11 +497,19 @@ async def process_user_message_async(message: types.Message):
     if math_result:
         math_context = f"\n\n[ТОЧНЫЙ РЕЗУЛЬТАТ ВЫЧИСЛЕНИЯ НА КАЛЬКУЛЯТОРЕ]: {math_result}"
 
-    # Веб-поиск для любых вопросов, утверждений и новостей (кроме коротких приветствий)
+    # Умный веб-поиск: активируем только по делу (вопросы со знаком ?, новости, факты, явные триггеры поиска)
+    explicit_search_triggers = ["найди", "погугли", "ищи", "загугли", "новости", "курс", "погода", "цена", "что", "кто", "где", "когда", "почему", "как", "рил", "правда"]
     skip_search_words = ["привет", "ку", "здарова", "здорово", "как дела", "хай", "пока", "сброс", "reset", "start"]
-    need_web_search = True
-    if math_result or (any(w in lower_text for w in skip_search_words) and len(text_content.split()) < 3):
+    
+    need_web_search = False
+    if math_result:
         need_web_search = False
+    elif any(w in lower_text for w in skip_search_words) and len(text_content.split()) < 3:
+        need_web_search = False
+    elif "?" in text_content:
+        need_web_search = True
+    elif any(re.search(rf'\b{re.escape(trig)}\b', lower_text) for trig in explicit_search_triggers):
+        need_web_search = True
 
     web_context = ""
     if need_web_search:
