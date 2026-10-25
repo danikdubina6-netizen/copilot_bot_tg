@@ -289,7 +289,6 @@ async def process_user_message_async(message: types.Message):
                 "без длинных разделителей и сложных списков, чтобы ответ был средней длины!"
             )
 
-            # Динамически добавляем точную дату и время в системный промпт для Vision
             current_time_str = datetime.datetime.now().strftime("%d.%m.%Y (%A), %H:%M")
             vision_system_prompt = f"ТЕКУЩЕЕ ТОЧНОЕ ВРЕМЯ И ДАТА: {current_time_str}.\n{chat_custom_instructions[chat_id]}"
 
@@ -323,7 +322,7 @@ async def process_user_message_async(message: types.Message):
                             reply_text = response.choices[0].message.content
                             break
                     except Exception as api_err:
-                        logging.warning(f"Попытка {attempt}: модель {model_name} отклонила запрос ({api_err}), ждем 10 сек...")
+                        logging.warning(f"Попытка фото {attempt}: модель {model_name} занята ({api_err}), ждем...")
                 
                 if not reply_text:
                     attempt += 1
@@ -331,11 +330,11 @@ async def process_user_message_async(message: types.Message):
 
         except Exception as e:
             logging.error(f"Критическая ошибка обработки фото: {e}")
+            reply_text = "Не удалось распознать фото из-за ошибки."
 
-        final_reply = reply_text or "Не удалось распознать фото."
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
-        chat_history[chat_id].append({"role": "assistant", "content": final_reply})
-        await message.reply(clean_text_for_telegram(final_reply), parse_mode="HTML")
+        chat_history[chat_id].append({"role": "assistant", "content": reply_text})
+        await message.reply(clean_text_for_telegram(reply_text), parse_mode="HTML")
         return
 
     # Обработка голосовых (Whisper)
@@ -493,21 +492,25 @@ async def process_user_message_async(message: types.Message):
     if len(chat_history[chat_id]) > 6:
         chat_history[chat_id] = chat_history[chat_id][-6:]
 
-    # ДИНАМИЧЕСКИ ВСТАВЛЯЕМ ТОЧНУЮ ДАТУ И ВРЕМЯ В СИСТЕМНЫЙ ПРОМПТ
     current_time_str = datetime.datetime.now().strftime("%d.%m.%Y (%A), %H:%M")
     dynamic_system_prompt = f"ТЕКУЩЕЕ ТОЧНОЕ ВРЕМЯ И ДАТА: {current_time_str}.\n{chat_custom_instructions[chat_id]}"
 
     messages_payload = [{"role": "system", "content": dynamic_system_prompt}] + chat_history[chat_id]
 
+    # БЕСКОНЕЧНЫЙ ЦИКЛ ПОВТОРА (безумная надежность без заглушек)
     reply_text = None
-    for model_name in TEXT_MODELS:
-        res = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload, 1300)
-        if res and not res.startswith("ERR_API"):
-            reply_text = res
-            break
-
-    if not reply_text:
-        reply_text = "Сервера перегружены сарказмом, попробуй еще раз!"
+    attempt = 1
+    while not reply_text:
+        for model_name in TEXT_MODELS:
+            res = await asyncio.to_thread(fetch_completion_sync, model_name, messages_payload, 1300)
+            if res and not res.startswith("ERR_API"):
+                reply_text = res
+                break
+        
+        if not reply_text:
+            attempt += 1
+            logging.info(f"Попытка текста {attempt}: модели перегружены или в лимите, ждем 10 сек и пробуем снова...")
+            await asyncio.sleep(10)
 
     chat_history[chat_id].append({"role": "assistant", "content": reply_text})
     processed_text = clean_text_for_telegram(reply_text)
