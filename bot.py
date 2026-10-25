@@ -8,6 +8,7 @@ import base64
 import io
 import urllib.parse
 import urllib.request
+import datetime
 from bs4 import BeautifulSoup
 from gtts import gTTS
 import aiohttp
@@ -50,15 +51,14 @@ VISION_MODELS = [
 ]
 
 BASE_INSTRUCTION = (
-    "Ты — Copilot AI. На дворе ОКТЯБРЬ 2026 ГОДА. "
+    "Ты — Copilot AI. "
     "СТРОЖАЙШЕЕ ПРАВИЛО СМЕНЫ РОЛИ: Если пользователь просит сменить стиль, поведение или роль "
     "(например, '/mode ...', 'будь ...', 'стань ...'), ты ОБЯЗАН СТРОГО И МГНОВЕННО переключиться на запрошенный стиль! "
     "СТИЛЬ ПО УМОЛЧАНИЮ: Отвечай с ЕДКИМ САРКАЗМОМ, ЖИВЫМ ЮМОРОМ И ИРОНИЕЙ! Будь веселым, подкалывай собеседника. "
     "СТРОГОЕ ПРАВИЛО ДЛИНЫ И ФОРМАТА: Твой ответ должен быть СРЕДНИМ ИЛИ КОРОТКИМ! Никаких гигантских лекций, "
     "длинных списков и затянутых объяснений. Пиши емко, лаконично и четко по сути, чтобы весь текст легко влезал на экран смартфона. "
     "ПРАВИЛО КОНЦОВКИ: ВСЕГДА завершай мысль полностью и ставь точку! Никаких обрывов предложений на полуслове. "
-    "ЯЗЫК: ИСКЛЮЧИТЕЛЬНО РУССКИЙ ЯЗЫК "
-    "Знай: сейчас 2026 год, никаких упоминаний что сейчас типо 2024, 2025."
+    "ЯЗЫК: ИСКЛЮЧИТЕЛЬНО РУССКИЙ ЯЗЫК."
 )
 
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -226,7 +226,7 @@ async def mode_cmd(message: types.Message):
     if len(args) > 1:
         new_persona = args[1]
         chat_custom_instructions[chat_id] = (
-            f"Ты — Copilot AI (ОКТЯБРЬ 2026 ГОДА). ПРИКАЗ ПО ПОВЕДЕНИЮ: {new_persona}. "
+            f"Ты — Copilot AI. ПРИКАЗ ПО ПОВЕДЕНИЮ: {new_persona}. "
             "Соблюдай эту роль СТРОГО И БЕЗОГОВОРНО в каждом ответе! Отвечай КРАТКО, ЕМКО И НА РУССКОМ ЯЗЫКЕ."
         )
         chat_history[chat_id] = []
@@ -289,7 +289,12 @@ async def process_user_message_async(message: types.Message):
                 "без длинных разделителей и сложных списков, чтобы ответ был средней длины!"
             )
 
+            # Динамически добавляем точную дату и время в системный промпт для Vision
+            current_time_str = datetime.datetime.now().strftime("%d.%m.%Y (%A), %H:%M")
+            vision_system_prompt = f"ТЕКУЩЕЕ ТОЧНОЕ ВРЕМЯ И ДАТА: {current_time_str}.\n{chat_custom_instructions[chat_id]}"
+
             vision_messages = [
+                {"role": "system", "content": vision_system_prompt},
                 {
                     "role": "user",
                     "content": [
@@ -374,7 +379,7 @@ async def process_user_message_async(message: types.Message):
         if lower_text.startswith(trig) or f" {trig}" in lower_text:
             new_style = text_content
             chat_custom_instructions[chat_id] = (
-                f"Ты — Copilot AI (ОКТЯБРЬ 2026 ГОДА). ПРИКАЗ ПО ПОВЕДЕНИЮ: {new_style}. "
+                f"Ты — Copilot AI. ПРИКАЗ ПО ПОВЕДЕНИЮ: {new_style}. "
                 "Соблюдай эту роль СТРОГО И БЕЗОГОВОРНО в каждом ответе! Отвечай КРАТКО, ЕМКО И НА РУССКОМ ЯЗЫКЕ."
             )
             chat_history[chat_id] = []
@@ -488,7 +493,11 @@ async def process_user_message_async(message: types.Message):
     if len(chat_history[chat_id]) > 6:
         chat_history[chat_id] = chat_history[chat_id][-6:]
 
-    messages_payload = [{"role": "system", "content": chat_custom_instructions[chat_id]}] + chat_history[chat_id]
+    # ДИНАМИЧЕСКИ ВСТАВЛЯЕМ ТОЧНУЮ ДАТУ И ВРЕМЯ В СИСТЕМНЫЙ ПРОМПТ
+    current_time_str = datetime.datetime.now().strftime("%d.%m.%Y (%A), %H:%M")
+    dynamic_system_prompt = f"ТЕКУЩЕЕ ТОЧНОЕ ВРЕМЯ И ДАТА: {current_time_str}.\n{chat_custom_instructions[chat_id]}"
+
+    messages_payload = [{"role": "system", "content": dynamic_system_prompt}] + chat_history[chat_id]
 
     reply_text = None
     for model_name in TEXT_MODELS:
