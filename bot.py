@@ -47,7 +47,8 @@ TEXT_MODELS = [
 ]
 
 VISION_MODELS = [
-    "qwen/qwen3.8-27b"
+    "qwen/qwen3.8-27b",
+    "openai/gpt-oss-20b"
 ]
 
 BASE_INSTRUCTION = (
@@ -284,7 +285,7 @@ async def process_user_message_async(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
-    # Обработка фото
+    # Обработка фото (Vision)
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         reply_text = None
@@ -310,7 +311,7 @@ async def process_user_message_async(message: types.Message):
 
             prompt_text = text_content if text_content else (
                 "Прочитай весь текст на этой картинке/инфографике и подробно перескажи суть "
-                "без длинных разделителей и сложных списков, чтобы ответ был средней длины!"
+                "в твоем фирменном саркастичном стиле!"
             )
 
             current_time_str = datetime.datetime.now().strftime("%d.%m.%Y (%A), %H:%M")
@@ -350,11 +351,11 @@ async def process_user_message_async(message: types.Message):
                 
                 if not reply_text:
                     attempt += 1
-                    await asyncio.sleep(10)
+                    await asyncio.sleep(5)
 
         except Exception as e:
             logging.error(f"Критическая ошибка обработки фото: {e}")
-            reply_text = "Не удалось распознать фото из-за ошибки."
+            reply_text = f"⚠️ Ошибка обработки фото: {e}"
 
         chat_history[chat_id].append({"role": "user", "content": f"[Фото]: {text_content}"})
         chat_history[chat_id].append({"role": "assistant", "content": reply_text})
