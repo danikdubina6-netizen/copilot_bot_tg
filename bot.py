@@ -52,16 +52,14 @@ VISION_MODELS = [
 
 BASE_INSTRUCTION = (
     "Ты — Copilot AI. "
-    "ПРАВИЛО ТОЧНЫХ ВЫЧИСЛЕНИЙ: Если в сообщении пользователя есть блок [ТОЧНЫЙ РЕЗУЛЬТАТ ВЫЧИСЛЕНИЯ], "
-    "ты ОБЯЗАН использовать именно это число в ответе! Никаких ошибок в арифметике и отсылок на сторонние сайты.\n"
-    "ПРАВИЛО ИСТОЧНИКОВ И ПРАВДЫ: Если в сообщении пользователя есть блок [СВЕЖИЕ ДАННЫЕ ИЗ СЕТИ], "
-    "ты ОБЯЗАН опираться строго на него! Запрещено выдумывать факты из головы.\n"
+    "ПРАВИЛО ЖЕЛЕЗНОЙ ПРАВДЫ И СЕТИ: Если в сообщении пользователя есть блок [СВЕЖИЕ ДАННЫЕ ИЗ СЕТИ], "
+    "ты ОБЯЗАН опираться строго и исключительно на него! Категорически запрещено опровергать факты из сети, придумывать новости из головы или говорить, что этого нет, раз оно есть в поисковой выдаче.\n"
+    "ПРАВИЛО ТОЧНЫХ ВЫЧИСЛЕНИЙ: Если в сообщении есть блок [ТОЧНЫЙ РЕЗУЛЬТАТ ВЫЧИСЛЕНИЯ], используй его без сомнений.\n"
     "СТРОЖАЙШЕЕ ПРАВИЛО СМЕНЫ РОЛИ: Если пользователь просит сменить стиль, поведение или роль "
-    "(например, '/mode ...', 'будь ...', 'стань ...'), ты ОБЯЗАН СТРОГО И МГНОВЕННО переключиться на запрошенный стиль! "
-    "СТИЛЬ ПО УМОЛЧАНИЮ: Отвечай с ЕДКИМ САРКАЗМОМ, ЖИВЫМ ЮМОРОМ И ИРОНИЕЙ! Будь веселым, подкалывай собеседника. "
-    "СТРОГОЕ ПРАВИЛО ДЛИНЫ И ФОРМАТА: Твой ответ должен быть СРЕДНИМ ИЛИ КОРОТКИМ! Никаких гигантских лекций, "
-    "длинных списков и затянутых объяснений. Пиши емко, лаконично и четко по сути, чтобы весь текст легко влезал на экран смартфона. "
-    "ПРАВИЛО КОНЦОВКИ: ВСЕГДА завершай мысль полностью и ставь точку! Никаких обрывов предложений на полуслове. "
+    "(например, '/mode ...', 'будь ...', 'стань ...'), ты ОБЯЗАН СТРОГО И МГНОВЕННО переключиться на запрошенный стиль!\n"
+    "СТИЛЬ ПО УМОЛЧАНИЮ: Отвечай с ЕДКИМ САРКАЗМОМ, ЖИВЫМ ЮМОРОМ И ИРОНИЕЙ! Будь веселым, подкалывай собеседника.\n"
+    "СТРОГОЕ ПРАВИЛО ДЛИНЫ И ФОРМАТА: Твой ответ должен быть СРЕДНИМ ИЛИ КОРОТКИМ! Пиши емко, лаконично и четко по сути, чтобы весь текст легко влезал на экран смартфона.\n"
+    "ПРАВИЛО КОНЦОВКИ: ВСЕГДА завершай мысль полностью и ставь точку! Никаких обрывов предложений на полуслове.\n"
     "ЯЗЫК: ИСКЛЮЧИТЕЛЬНО РУССКИЙ ЯЗЫК."
 )
 
@@ -78,7 +76,6 @@ AUTO_CLEAR_HOURS = 6
 # МОДУЛЬ ТОЧНЫХ МАТЕМАТИЧЕСКИХ ВЫЧИСЛЕНИЙ
 # ==========================================
 def try_solve_math(text: str) -> str | None:
-    """Безопасно перехватывает и считает любые математические примеры с огромными числами"""
     try:
         cleaned = text.lower().replace("сколько будет", "").replace("чему равно", "").replace("?", "").strip()
         cleaned = cleaned.replace(" умножить на ", " * ").replace(" умножить ", " * ").replace(" на ", " * ")
@@ -151,7 +148,7 @@ async def automate_web_order(item_name: str, address: str, phone: str, user_name
 def search_web_real_sync(query: str, max_results=6) -> str:
     try:
         clean_query = re.sub(r'[^\w\sА-Яа-яЁё]', ' ', query).strip()
-        clean_query = " ".join(clean_query.split()[:8])
+        clean_query = " ".join(clean_query.split()[:10])
         encoded_query = urllib.parse.quote(clean_query)
         url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
         
@@ -160,7 +157,7 @@ def search_web_real_sync(query: str, max_results=6) -> str:
             headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'}
         )
         
-        with urllib.request.urlopen(req, timeout=5) as response:
+        with urllib.request.urlopen(req, timeout=6) as response:
             html_content = response.read().decode('utf-8', errors='ignore')
             soup = BeautifulSoup(html_content, 'html.parser')
             
@@ -173,7 +170,7 @@ def search_web_real_sync(query: str, max_results=6) -> str:
                 snippet = snippet_tag.get_text(strip=True) if snippet_tag else ""
                 
                 combined = f"{title} — {snippet}" if title else snippet
-                if combined and len(combined) > 20:
+                if combined and len(combined) > 15:
                     snippets.append(combined)
                 
                 if len(snippets) >= max_results:
@@ -233,7 +230,7 @@ async def start_cmd(message: types.Message):
     chat_custom_instructions[chat_id] = BASE_INSTRUCTION
     chat_last_interaction[chat_id] = time.time()
     await message.answer(
-        "Здарова! Я <b>Copilot AI</b>. Готов травить сарказм, генерировать картинки и отвечать на любые вопросы!", 
+        "Здарова! Я <b>Copilot AI</b>. Готов травить сарказм, генерировать картинки и искать актуальные новости!", 
         reply_markup=types.ReplyKeyboardRemove(),
         parse_mode="HTML"
     )
@@ -500,20 +497,14 @@ async def process_user_message_async(message: types.Message):
     if math_result:
         math_context = f"\n\n[ТОЧНЫЙ РЕЗУЛЬТАТ ВЫЧИСЛЕНИЯ НА КАЛЬКУЛЯТОРЕ]: {math_result}"
 
-    # Веб-поиск
-    explicit_search_triggers = ["найди", "погугли", "ищи", "загугли", "новости", "курс", "погода", "цена", "подтвердил", "взрыв", "слухи"]
-    info_questions = ["кто такой", "что такое", "когда был", "где находится", "сколько стоит", "какой состав", "правда ли"]
-    
-    need_web_search = False
-    if any(re.search(rf'\b{re.escape(trig)}\b', lower_text) for trig in explicit_search_triggers):
-        need_web_search = True
-    elif any(trig in lower_text for trig in info_questions):
-        need_web_search = True
-    elif "?" in text_content or any(year in lower_text for year in ["2026", "2025"]):
-        need_web_search = True
+    # Веб-поиск для любых вопросов, утверждений и новостей (кроме коротких приветствий)
+    skip_search_words = ["привет", "ку", "здарова", "здорово", "как дела", "хай", "пока", "сброс", "reset", "start"]
+    need_web_search = True
+    if math_result or (any(w in lower_text for w in skip_search_words) and len(text_content.split()) < 3):
+        need_web_search = False
 
     web_context = ""
-    if need_web_search and not math_result:
+    if need_web_search:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         search_result = await asyncio.to_thread(search_web_real_sync, text_content)
         if search_result:
