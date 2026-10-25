@@ -52,9 +52,10 @@ VISION_MODELS = [
 
 BASE_INSTRUCTION = (
     "Ты — Copilot AI. "
+    "ПРАВИЛО ТОЧНЫХ ВЫЧИСЛЕНИЙ: Если в сообщении пользователя есть блок [ТОЧНЫЙ РЕЗУЛЬТАТ ВЫЧИСЛЕНИЯ], "
+    "ты ОБЯЗАН использовать именно это число в ответе! Никаких ошибок в арифметике и отсылок на сторонние сайты.\n"
     "ПРАВИЛО ИСТОЧНИКОВ И ПРАВДЫ: Если в сообщении пользователя есть блок [СВЕЖИЕ ДАННЫЕ ИЗ СЕТИ], "
-    "ты ОБЯЗАН опираться строго на него! Запрещено выдумывать факты из головы или брать информацию «из воздуха». "
-    "Если точных данных нет, признай это, но не лги.\n"
+    "ты ОБЯЗАН опираться строго на него! Запрещено выдумывать факты из головы.\n"
     "СТРОЖАЙШЕЕ ПРАВИЛО СМЕНЫ РОЛИ: Если пользователь просит сменить стиль, поведение или роль "
     "(например, '/mode ...', 'будь ...', 'стань ...'), ты ОБЯЗАН СТРОГО И МГНОВЕННО переключиться на запрошенный стиль! "
     "СТИЛЬ ПО УМОЛЧАНИЮ: Отвечай с ЕДКИМ САРКАЗМОМ, ЖИВЫМ ЮМОРОМ И ИРОНИЕЙ! Будь веселым, подкалывай собеседника. "
@@ -72,6 +73,29 @@ chat_custom_instructions = {}
 group_message_counters = {}
 chat_last_interaction = {}
 AUTO_CLEAR_HOURS = 6
+
+# ==========================================
+# МОДУЛЬ ТОЧНЫХ МАТЕМАТИЧЕСКИХ ВЫЧИСЛЕНИЙ
+# ==========================================
+def try_solve_math(text: str) -> str | None:
+    """Безопасно перехватывает и считает любые математические примеры с огромными числами"""
+    try:
+        cleaned = text.lower().replace("сколько будет", "").replace("чему равно", "").replace("?", "").strip()
+        cleaned = cleaned.replace(" умножить на ", " * ").replace(" умножить ", " * ").replace(" на ", " * ")
+        cleaned = cleaned.replace(" плюс ", " + ").replace(" минус ", " - ").replace(" разделить на ", " / ").replace(" разделить ", " / ")
+        cleaned = cleaned.replace("х", "*").replace("×", "*").replace(":", "/")
+        
+        cleaned_expr = re.sub(r'[^0-9\+\-\*\/\.\(\)\s]', '', cleaned).strip()
+        
+        if not cleaned_expr or not any(op in cleaned_expr for op in ['+', '-', '*', '/']):
+            return None
+            
+        result = eval(cleaned_expr, {"__builtins__": {}}, {})
+        if isinstance(result, float) and result.is_integer():
+            result = int(result)
+        return str(result)
+    except Exception:
+        return None
 
 # ==========================================
 # МОДУЛЬ ВЕБ-АВТОМАТИЗАЦИИ (PLAYWRIGHT)
@@ -470,6 +494,12 @@ async def process_user_message_async(message: types.Message):
     if not text_content:
         return
 
+    # Проверка на математику (автоматический расчет на калькуляторе)
+    math_result = try_solve_math(text_content)
+    math_context = ""
+    if math_result:
+        math_context = f"\n\n[ТОЧНЫЙ РЕЗУЛЬТАТ ВЫЧИСЛЕНИЯ НА КАЛЬКУЛЯТОРЕ]: {math_result}"
+
     # Веб-поиск
     explicit_search_triggers = ["найди", "погугли", "ищи", "загугли", "новости", "курс", "погода", "цена", "подтвердил", "взрыв", "слухи"]
     info_questions = ["кто такой", "что такое", "когда был", "где находится", "сколько стоит", "какой состав", "правда ли"]
@@ -483,7 +513,7 @@ async def process_user_message_async(message: types.Message):
         need_web_search = True
 
     web_context = ""
-    if need_web_search:
+    if need_web_search and not math_result:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         search_result = await asyncio.to_thread(search_web_real_sync, text_content)
         if search_result:
@@ -491,7 +521,8 @@ async def process_user_message_async(message: types.Message):
 
     await bot.send_chat_action(chat_id=chat_id, action="typing")
     
-    chat_history[chat_id].append({"role": "user", "content": text_content + web_context})
+    final_user_content = text_content + math_context + web_context
+    chat_history[chat_id].append({"role": "user", "content": final_user_content})
     if len(chat_history[chat_id]) > 6:
         chat_history[chat_id] = chat_history[chat_id][-6:]
 
@@ -500,7 +531,7 @@ async def process_user_message_async(message: types.Message):
 
     messages_payload = [{"role": "system", "content": dynamic_system_prompt}] + chat_history[chat_id]
 
-    # Бесконечный цикл повтора без заглушек и с упором на правду
+    # Бесконечный цикл повтора без заглушек
     reply_text = None
     attempt = 1
     while not reply_text:
