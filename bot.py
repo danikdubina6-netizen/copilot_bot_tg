@@ -73,10 +73,18 @@ chat_last_interaction = {}
 AUTO_CLEAR_HOURS = 6
 
 # ==========================================
-# МОДУЛЬ ТОЧНЫХ МАТЕМАТИЧЕСКИХ ВЫЧИСЛЕНИЙ
+# МОДУЛЬ ТОЧНЫХ МАТЕМАТИЧЕСКИХ ВЫЧИСЛЕНИЙ (ИСПРАВЛЕННЫЙ)
 # ==========================================
 def try_solve_math(text: str) -> str | None:
     try:
+        lower = text.lower()
+        math_keywords = ["плюс", "минус", "умножить", "разделить", "+", "*", "/"]
+        if not any(kw in lower for kw in math_keywords):
+            return None
+
+        if re.search(r'\b(19|20)\d{2}\b', text) and not any(op in text for op in ['+', '*', '/']):
+            return None
+
         cleaned = text.lower().replace("сколько будет", "").replace("чему равно", "").replace("?", "").strip()
         cleaned = cleaned.replace(" умножить на ", " * ").replace(" умножить ", " * ").replace(" на ", " * ")
         cleaned = cleaned.replace(" плюс ", " + ").replace(" минус ", " - ").replace(" разделить на ", " / ").replace(" разделить ", " / ")
@@ -145,7 +153,6 @@ async def automate_web_order(item_name: str, address: str, phone: str, user_name
         logging.error(f"❌ Ошибка работы Playwright робота: {e}")
         return False
 
-# ИСПРАВЛЕНО: увеличили количество результатов поиска до 8 для максимальной точности фактов
 def search_web_real_sync(query: str, max_results=8) -> str:
     try:
         clean_query = re.sub(r'[^\w\sА-Яа-яЁё]', ' ', query).strip()
