@@ -54,7 +54,9 @@ VISION_MODELS = [
 BASE_INSTRUCTION = (
     "Ты — Copilot AI. "
     "ПРАВИЛО ЖЕЛЕЗНОЙ ПРАВДЫ И СЕТИ: Если в сообщении пользователя есть блок [СВЕЖИЕ ДАННЫЕ ИЗ СЕТИ], "
-    "ты ОБЯЗАН опираться строго и исключительно на него! Категорически запрещено опровергать факты из сети, придумывать новости из головы или говорить, что этого нет, раз оно есть в поисковой выдаче.\n"
+    "ты ОБЯЗАН опираться строго и исключительно на него! ОПИСЫВАЙ ВСЁ САМ: категорически запрещено давать ссылки на сайты, "
+    "отправлять пользователя на сторонние ресурсы или писать в стиле 'посмотрите на таком-то сайте'. "
+    "Ты должен сам полностью пересказать суть, факты или содержание прямо в своем ответе, без отписок!\n"
     "ПРАВИЛО ТОЧНЫХ ВЫЧИСЛЕНИЙ: Если в сообщении есть блок [ТОЧНЫЙ РЕЗУЛЬТАТ ВЫЧИСЛЕНИЯ], используй его без сомнений.\n"
     "СТРОЖАЙШЕЕ ПРАВИЛО СМЕНЫ РОЛИ: Если пользователь просит сменить стиль, поведение или роль "
     "(например, '/mode ...', 'будь ...', 'стань ...'), ты ОБЯЗАН СТРОГО И МГНОВЕННО переключиться на запрошенный стиль!\n"
@@ -285,7 +287,7 @@ async def process_user_message_async(message: types.Message):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
-    # Обработка фото (Vision)
+    # Обработка фото (Vision) с БЕСКОНЕЧНЫМ ЦИКЛОМ
     if message.photo:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         reply_text = None
@@ -351,7 +353,8 @@ async def process_user_message_async(message: types.Message):
                 
                 if not reply_text:
                     attempt += 1
-                    await asyncio.sleep(5)
+                    logging.info(f"Модели для фото заняты (попытка {attempt}), ожидание 10 сек...")
+                    await asyncio.sleep(10)
 
         except Exception as e:
             logging.error(f"Критическая ошибка обработки фото: {e}")
@@ -531,7 +534,7 @@ async def process_user_message_async(message: types.Message):
 
     messages_payload = [{"role": "system", "content": dynamic_system_prompt}] + chat_history[chat_id]
 
-    # Бесконечный цикл повтора без заглушек
+    # БЕСКОНЕЧНЫЙ ЦИКЛ ПОВТОРА ДЛЯ ТЕКСТА
     reply_text = None
     attempt = 1
     while not reply_text:
